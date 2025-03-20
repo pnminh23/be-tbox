@@ -1,0 +1,25 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pnminh23/be-tbox.git"
+  },
+  "keywords": [
+    "be-tbox",
+    "nodejs",
+    "node-18.16.0"
+  ],
+  "author": "pnminh2911",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/pnminh23/be-tbox/issues"
+  },
+  "homepage": "https://github.com/pnminh23/be-tbox#readme"
+}
