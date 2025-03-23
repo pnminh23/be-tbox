@@ -18,4 +18,4 @@ app.use(cors({ credentials: true }));
 app.get('/', (req, res) => res.send('API working'));
 app.use('/api/auth', authRouter);
 
-app.listen(port, () => console.log(`Server start on PORT: ${port}`));
+console.log(`Server is running on http://${env.APP_HOST}:${env.APP_PORT}`);

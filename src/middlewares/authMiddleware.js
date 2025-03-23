@@ -5,19 +5,21 @@ const authMiddleware = async (req, res, next) => {
     const { token } = req.cookies;
 
     if (!token) {
-        return res.status(400).json({
+        return res.status(401).json({
             success: false,
             message: 'Not authorized. Login again',
         });
     }
+
     try {
         const tokenDecode = jwt.verify(token, env.JWT_SECRET);
 
-        if (tokenDecode.id) {
-            req.body.accountId = tokenDecode.id;
-        } else {
-            return res.json({ success: false, message: 'Not Authorized. Login again' });
+        if (!tokenDecode.id) {
+            return res.status(401).json({ success: false, message: 'Not Authorized. Login again' });
         }
+
+        req.body.accountId = tokenDecode.id;
+        req.body.role = tokenDecode.role;
 
         next();
     } catch (error) {
