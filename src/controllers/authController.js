@@ -58,11 +58,11 @@ export const login = async (req, res) => {
     try {
         const account = await accountModel.findOne({ email });
 
-        if (!account) return res.status(400).json({ sucess: false, message: 'Invalid email' });
+        if (!account) return res.status(400).json({ sucess: false, message: 'Email không tồn tại' });
 
         const isMatch = await bcrypt.compare(password, account.password);
 
-        if (!isMatch) return res.status(400).json({ sucess: false, message: 'Invalid password' });
+        if (!isMatch) return res.status(400).json({ sucess: false, message: 'Mật khẩu không đúng' });
 
         const token = jwt.sign({ id: account._id, role: account.role }, env.JWT_SECRET, { expiresIn: '7d' });
 
