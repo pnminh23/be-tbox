@@ -4,18 +4,21 @@ import {
     logout,
     register,
     resetPassword,
-    resendOtpResetPassword,
     verifyEmail,
+    verifyOtpResetPassword,
+    resendOTP,
+    forgotPassword,
 } from '../controllers/authController.js';
-import authMiddleware from '../middlewares/authMiddleware.js';
 
 const authRouter = express.Router();
 
 authRouter.post('/register', register);
 authRouter.post('/login', login);
 authRouter.post('/logout', logout);
-authRouter.post('/verify-account', authMiddleware, verifyEmail);
-authRouter.post('/send-reset-otp', resendOtpResetPassword);
+authRouter.post('/verify-account', verifyEmail);
+authRouter.post('/resend-otp', resendOTP);
+authRouter.post('/forgotPassword', forgotPassword);
+authRouter.post('/verify-otp-reset-password', verifyOtpResetPassword);
 authRouter.post('/reset-password', resetPassword);
 
 export default authRouter;

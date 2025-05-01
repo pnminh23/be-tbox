@@ -1,20 +1,25 @@
 import mongoose from 'mongoose';
 
-const accountSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    role: {
-        type: String,
-        enum: ['user', 'admin', 'employee'],
-        default: 'user',
+const accountSchema = new mongoose.Schema(
+    {
+        name: { type: String, required: true },
+        email: { type: String, required: true, unique: true },
+        phone: { type: String, required: true },
+        password: { type: String, required: true },
+        image: { type: String, default: '' },
+        role: {
+            type: String,
+            enum: ['user', 'admin', 'employee'],
+            default: 'user',
+        },
+        isActive: { type: Boolean, default: false },
+        isLock: { type: Boolean, default: false },
+        isResetpassword: { type: Boolean, default: false },
+        verifyOTP: { type: String, default: '' },
+        verifyOTPExpireAt: { type: Number, default: 0 },
     },
-    isAccountVerified: { type: Boolean, default: false },
-    verifyOTP: { type: String, default: '' },
-    verifyOTPExpireAt: { type: Number, default: 0 },
-    resetOTP: { type: String, default: '' },
-    resetOTPExpireAt: { type: Number, default: 0 },
-});
+    { timestamps: true }
+);
 
 const accountModel = mongoose.models.account || mongoose.model('account', accountSchema);
 
