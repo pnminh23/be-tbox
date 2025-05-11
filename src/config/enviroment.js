@@ -7,4 +7,7 @@ export const env = {
     NODE_ENV: process.env.NODE_ENV,
     USER_EMAIL: process.env.USER_EMAIL,
     PASSWORD_EMAIL: process.env.PASSWORD_EMAIL,
+    CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
+    CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY,
+    CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET,
 };

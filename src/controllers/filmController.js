@@ -1,0 +1,215 @@
+import filmModel from '../models/filmModel.js';
+import path from 'path';
+import fs from 'fs/promises'; // dùng promise-based API
+import { formatString } from '../services/formatString.js';
+
+const normalizeCategory = (str) => {
+    return str
+        .split('-')
+        .map((part) =>
+            part
+                .trim()
+                .split(' ')
+                .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ')
+        )
+        .join(' - ');
+};
+export const createFilm = async (req, res) => {
+    const { name, nameEnglish, category, release_date, duration, country } = req.body;
+    let image = '';
+
+    if (!name || !nameEnglish || !category || !release_date || !duration || !country)
+        return res.status(400).json({ success: false, message: 'Hãy nhập đẩy đủ các trường' });
+
+    try {
+        const existingFilm = await filmModel.findOne({ name });
+        if (existingFilm) return res.status(400).json({ success: false, message: 'Phim này đã tồn tại' });
+
+        if (req.file) {
+            // Nếu film đã có ảnh cũ → xóa ảnh cũ
+
+            // Quy tắc đặt tên file: 'avatar_email.jpg'
+            const namePrefix = nameEnglish.replace(/[^a-zA-Z0-9]/g, '_');
+
+            const newFilename = `film_${namePrefix}${path.extname(req.file.originalname)}`;
+
+            // Lưu thông tin file
+            const folder = 'films'; // Ví dụ folder avatar
+            const fileInfo = {
+                filename: newFilename,
+                folder: folder,
+                path: path.join('uploads', folder, newFilename), // Lưu đường dẫn đầy đủ
+            };
+
+            image = `http://localhost:2911/${fileInfo.path.replace(/\\/g, '/')}`;
+
+            // Di chuyển file vào thư mục và đổi tên
+            await fs.rename(req.file.path, fileInfo.path);
+        }
+
+        const normalizedCategory = Array.isArray(category)
+            ? category.map(normalizeCategory)
+            : [normalizeCategory(category)];
+
+        const newfilm = await filmModel.create({
+            name: formatString(name),
+            nameEnglish: formatString(nameEnglish),
+            category: normalizedCategory,
+            release_date: formatString(release_date),
+            duration: formatString(duration),
+            image,
+            country: formatString(country),
+        });
+
+        await newfilm.save();
+        return res.status(200).json({ success: true, message: 'Thêm phim thành công' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const getAllFilms = async (req, res) => {
+    try {
+        const films = await filmModel.find({});
+
+        if (films.length === 0) {
+            return res.status(400).json({ success: false, message: 'Không có thể loại nào trong cơ sở dữ liệu' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: films,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const getFilmsByCurrentYear = async (req, res) => {
+    try {
+        const currentYear = new Date().getFullYear().toString();
+        const films = await filmModel.find({ release_date: currentYear });
+
+        if (films.length === 0) {
+            return res.status(400).json({ success: false, message: 'Không có thể loại nào trong cơ sở dữ liệu' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: films,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const getFilmById = async (req, res) => {
+    try {
+        const { _id } = req.params;
+
+        const film = await filmModel.findOne({ _id }).populate('category', 'name -_id');
+
+        if (film.length === 0) {
+            return res.status(400).json({ success: false, message: 'Không có thể loại nào trong cơ sở dữ liệu' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Lấy data phim thành công',
+            data: film,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const editFilms = async (req, res) => {
+    try {
+        const { _id } = req.params;
+        const { name, nameEnglish, category, release_date, duration, country } = req.body;
+
+        const film = await filmModel.findOne({ _id });
+        if (!film) {
+            return res.status(400).json({ success: false, message: 'Không tìm thấy phim' });
+        }
+
+        if (name !== undefined) film.name = formatString(name);
+        if (nameEnglish !== undefined) film.nameEnglish = formatString(nameEnglish);
+        if (release_date !== undefined) film.release_date = formatString(release_date);
+        if (duration !== undefined) film.duration = formatString(duration);
+        if (country !== undefined) film.country = formatString(country);
+        if (category !== undefined) {
+            film.category = category;
+        }
+
+        if (req.file) {
+            console.log('New uploaded file:', req.file);
+
+            if (film.image) {
+                try {
+                    await fs.unlink(film.image);
+                } catch (err) {
+                    console.error('Failed to delete old image:', err);
+                }
+            }
+
+            const namePrefix = film.nameEnglish.replace(/[^a-zA-Z0-9]/g, '_');
+
+            const newFilename = `film_${namePrefix}${path.extname(req.file.originalname)}`;
+
+            // Lưu thông tin file
+            const folder = 'films'; // Ví dụ folder avatar
+            const fileInfo = {
+                filename: newFilename,
+                folder: folder,
+                path: path.join('uploads', folder, newFilename), // Lưu đường dẫn đầy đủ
+            };
+
+            // Di chuyển file vào thư mục và đổi tên
+            await fs.rename(req.file.path, fileInfo.path);
+        }
+
+        await film.save(); // Lưu thay đổi vào database
+
+        return res.status(200).json({
+            success: true,
+            message: 'Cập nhật thành công',
+            data: film,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const deleteFilm = async (req, res) => {
+    try {
+        const { _id } = req.params;
+
+        const film = await filmModel.findOne({ _id });
+        if (!film) {
+            return res.status(400).json({ success: false, message: 'Phim không tồn tại' });
+        }
+
+        // Xóa ảnh nếu tồn tại
+        if (film.image) {
+            try {
+                // Lấy đường dẫn tương đối từ URL
+                const imagePath = film.image.replace('http://localhost:2911/', '');
+                await fs.unlink(imagePath);
+            } catch (err) {
+                console.error('Lỗi khi xóa ảnh:', err.message);
+            }
+        }
+
+        // Xóa phim khỏi database
+        const result = await filmModel.deleteOne({ _id });
+        if (result.deletedCount === 0) {
+            return res.status(400).json({ success: false, message: 'Phim không tồn tại' });
+        }
+
+        return res.status(200).json({ success: true, message: 'Xóa phim thành công' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};

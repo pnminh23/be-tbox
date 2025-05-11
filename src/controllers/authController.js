@@ -70,16 +70,26 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
     const { email, password } = req.body;
 
-    if (!email || !password) return res.status(400).json({ success: false, message: 'Email or password are required' });
+    if (!email || !password) {
+        return res.status(400).json({ success: false, message: 'Email or password are required' });
+    }
 
     try {
         const account = await accountModel.findOne({ email });
 
-        if (!account) return res.status(400).json({ success: false, message: 'Email không tồn tại' });
+        if (!account) {
+            return res.status(400).json({ success: false, message: 'Email không tồn tại' });
+        }
+
+        if (account.isLock) {
+            return res.status(403).json({ success: false, message: 'Tài khoản của bạn đã bị khóa' });
+        }
 
         const isMatch = await bcrypt.compare(password, account.password);
 
-        if (!isMatch) return res.status(400).json({ success: false, message: 'Mật khẩu không đúng' });
+        if (!isMatch) {
+            return res.status(400).json({ success: false, message: 'Mật khẩu không đúng' });
+        }
 
         const token = jwt.sign({ id: account._id, role: account.role }, env.JWT_SECRET, { expiresIn: '7d' });
 
@@ -236,8 +246,8 @@ export const verifyOtpResetPassword = async (req, res) => {
             return res.status(400).json({ success: false, message: 'OTP đã hết hạn' });
 
         // Nếu OK, xóa OTP nhưng thêm 1 flag mới cho phép đổi mật khẩu
-        account.resetOTP = '';
-        account.resetOTPExpireAt = 0;
+        account.verifyOTP = '';
+        account.verifyOTPExpireAt = 0;
         account.isResetpassword = true;
         await account.save();
 
