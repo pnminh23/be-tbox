@@ -1,39 +1,78 @@
 import branchModel from '../models/branchModel.js';
+import roomTypeModel from '../models/roomTypeModel.js';
+import roomModel from '../models/roomModel.js';
 import { formatString } from '../services/formatString.js';
 
 export const createBranch = async (req, res) => {
-    const { name, address, phone, typeRoom } = req.body;
-    if (!name || !address || !phone || !typeRoom)
+    let { name, address, phone } = req.body;
+    if (!name || !address || !phone)
         return res.status(400).json({ success: false, message: 'Hãy nhập đẩy đủ các trường' });
 
     try {
+        name = formatString(name).toUpperCase();
+        address = formatString(address);
+        phone = formatString(phone);
+
         const existingBranch = await branchModel.findOne({ name });
         if (existingBranch) return res.status(400).json({ success: false, message: 'Phim này đã tồn tại' });
 
+        const allRoomTypes = await roomTypeModel.find({}, '_id'); // chỉ lấy trường _id
+        const typeRoomIds = allRoomTypes.map((rt) => rt._id);
+
         const newBranch = await branchModel.create({
-            name: formatString(name),
-            address: formatString(address),
-            phone: formatString(phone),
-            typeRoom,
+            name,
+            address,
+            phone,
+            typeRoom: typeRoomIds,
         });
 
         await newBranch.save();
-        return res.status(200).json({ success: true, message: 'Thêm cơ sở mới thành công' });
+        return res.status(200).json({ success: true, message: 'Thêm cơ sở mới thành công', data: newBranch });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 };
 
+// export const getAllBranch = async (req, res) => {
+//     try {
+//         const branches = await branchModel.find({}).populate('typeRoom');
+
+//         if (branches.length === 0)
+//             return res.status(400).json({ success: false, message: 'Không có cơ sở nào trong cơ sở dữ liệu' });
+
+//         return res.status(200).json({
+//             success: true,
+//             data: branches,
+//         });
+//     } catch (error) {
+//         res.status(500).json({ success: false, message: error.message });
+//     }
+// };
+
 export const getAllBranch = async (req, res) => {
     try {
-        const branches = await branchModel.find({}).populate('typeRoom');
+        const branches = await branchModel.find({}).populate('typeRoom').lean(); // cần .lean() để chỉnh sửa object trả về
 
-        if (branches.length === 0)
-            return res.status(400).json({ success: false, message: 'Không có cơ sở nào trong cơ sở dữ liệu' });
+        const allRooms = await roomModel.find({}).lean();
+
+        // Gắn rooms vào từng branch
+        const branchesWithRooms = branches.map((branch) => {
+            const roomsInBranch = allRooms
+                .filter((room) => room.branch.toString() === branch._id.toString())
+                .sort((a, b) => {
+                    const numA = parseInt(a.name, 10);
+                    const numB = parseInt(b.name, 10);
+                    return numA - numB;
+                });
+            return {
+                ...branch,
+                rooms: roomsInBranch,
+            };
+        });
 
         return res.status(200).json({
             success: true,
-            data: branches,
+            data: branchesWithRooms,
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -44,8 +83,7 @@ export const getBranchById = async (req, res) => {
     try {
         const { _id } = req.params;
 
-        const branch = await branchModel.findOne({ _id });
-
+        const branch = await branchModel.findOne({ _id }).populate('typeRoom');
         if (!branch) {
             return res.status(400).json({ success: false, message: 'Không có cơ sở này trong cơ sở dữ liệu' });
         }

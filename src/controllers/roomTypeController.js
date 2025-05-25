@@ -1,4 +1,4 @@
-import roomTypeModel from '../models/roomtypeModel.js';
+import roomTypeModel from '../models/roomTypeModel.js';
 import { formatString } from '../services/formatString.js';
 
 export const createRoomType = async (req, res) => {

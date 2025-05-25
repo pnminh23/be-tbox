@@ -10,4 +10,7 @@ export const env = {
     CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
     CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY,
     CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET,
+    PAYOS_CLIENT_ID: process.env.PAYOS_CLIENT_ID,
+    PAYOS_API_KEY: process.env.PAYOS_API_KEY,
+    PAYOS_CHECKSUM_KEY: process.env.PAYOS_CHECKSUM_KEY,
 };

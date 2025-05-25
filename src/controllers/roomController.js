@@ -104,7 +104,7 @@ export const deleteRoom = async (req, res) => {
             }
         }
 
-        const result = await roomTypeModel.deleteOne({ _id });
+        const result = await roomModel.deleteOne({ _id });
 
         return res.status(200).json({ success: true, message: 'Xóa phòng thành công' });
     } catch (error) {

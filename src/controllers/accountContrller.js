@@ -15,6 +15,8 @@ export const getUserData = async (req, res) => {
             data: {
                 name: account.name,
                 image: account.image,
+                phone: account.phone,
+                email: account.email,
             },
         });
     } catch (error) {
