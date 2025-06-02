@@ -2,6 +2,7 @@ import filmModel from '../models/filmModel.js';
 import path from 'path';
 import fs from 'fs/promises'; // dùng promise-based API
 import { formatString } from '../services/formatString.js';
+import bookingModel from '../models/bookingModel.js';
 
 const normalizeCategory = (str) => {
     return str
@@ -121,6 +122,110 @@ export const getFilmById = async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const getFilmsByCategory = async (req, res) => {
+    try {
+        const { name } = req.query;
+
+        if (!name) {
+            return res.status(400).json({ success: false, message: 'Thiếu tham số category (name)' });
+        }
+
+        // Normalize lại thể loại giống như khi tạo phim
+        const normalizedCategory = normalizeCategory(name);
+
+        const films = await filmModel.find({ category: { $in: [normalizedCategory] } });
+
+        if (films.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy phim thuộc thể loại này' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: films,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const getFilmsByYear = async (req, res) => {
+    try {
+        const { release_date } = req.query;
+
+        if (!release_date) {
+            return res.status(400).json({ success: false, message: 'Thiếu tham số release_date ' });
+        }
+
+        const films = await filmModel.find({ release_date: { $in: [release_date] } });
+
+        if (films.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy phim thuộc thể loại này' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: films,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const getTop10MostBookedFilms = async (req, res) => {
+    try {
+        const topFilms = await bookingModel.aggregate([
+            {
+                $group: {
+                    _id: '$film',
+                    totalBookings: { $sum: 1 },
+                },
+            },
+            {
+                $sort: { totalBookings: -1 },
+            },
+            {
+                $limit: 10,
+            },
+            {
+                $lookup: {
+                    from: 'films', // collection name đúng (trong MongoDB sẽ là 'films')
+                    localField: '_id',
+                    foreignField: '_id',
+                    as: 'filmInfo',
+                },
+            },
+            {
+                $unwind: '$filmInfo',
+            },
+            {
+                $project: {
+                    _id: '$filmInfo._id',
+                    name: '$filmInfo.name',
+                    nameEnglish: '$filmInfo.nameEnglish',
+                    image: '$filmInfo.image',
+                    category: '$filmInfo.category',
+                    release_date: '$filmInfo.release_date',
+                    duration: '$filmInfo.duration',
+                    country: '$filmInfo.country',
+                    totalBookings: 1,
+                },
+            },
+        ]);
+
+        const topFilmsWithIndex = topFilms.map((film, index) => ({
+            ...film,
+            index,
+        }));
+
+        return res.status(200).json({
+            success: true,
+            data: topFilmsWithIndex,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 

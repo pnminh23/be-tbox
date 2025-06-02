@@ -53,7 +53,7 @@ export const getRoom = async (req, res) => {
         const { branch, type } = req.params;
         if (!branch || !type) return res.status(400).json({ success: false, message: 'Hãy nhập đẩy đủ các trường' });
 
-        const rooms = await roomModel.find({ branch, type });
+        const rooms = await roomModel.find({ branch, type }).populate('type');
 
         if (rooms.length === 0)
             return res.status(400).json({ success: false, message: 'Không có phòng nào trong cơ sở dữ liệu' });
@@ -72,7 +72,7 @@ export const getRoomByBranchId = async (req, res) => {
         const { branch } = req.params;
         if (!branch) return res.status(400).json({ success: false, message: 'Hãy nhập đẩy đủ các trường' });
 
-        const rooms = await roomModel.find({ branch });
+        const rooms = await roomModel.find({ branch }).sort({ name: 1 });
 
         if (rooms.length === 0)
             return res.status(400).json({ success: false, message: 'Không có phòng nào trong cơ sở dữ liệu' });

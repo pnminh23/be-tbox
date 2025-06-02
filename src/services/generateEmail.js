@@ -26,7 +26,8 @@ export function generateMailBooking({ to, subject, title, message, booking }) {
               style: 'currency',
               currency: 'VND',
           })}</p>
-          <p><strong>Trạng thái:</strong> ${booking.isPay}</p>
+          <p><strong>Trạng thái đơn:</strong> ${booking.status}</p>
+          <p><strong>Tình trạng thanh toán:</strong> ${booking.isPay}</p>
         </div>
 
 

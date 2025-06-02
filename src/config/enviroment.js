@@ -13,4 +13,5 @@ export const env = {
     PAYOS_CLIENT_ID: process.env.PAYOS_CLIENT_ID,
     PAYOS_API_KEY: process.env.PAYOS_API_KEY,
     PAYOS_CHECKSUM_KEY: process.env.PAYOS_CHECKSUM_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
 };

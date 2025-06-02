@@ -12,12 +12,7 @@ export const getUserData = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            data: {
-                name: account.name,
-                image: account.image,
-                phone: account.phone,
-                email: account.email,
-            },
+            data: account,
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

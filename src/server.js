@@ -18,6 +18,7 @@ import BookingRouter from './routes/bookingRoutes.js'; // Thêm nếu bạn đã
 import { Server } from 'socket.io';
 import http from 'http';
 import PaymentRouter from './routes/paymentRoutes.js';
+import { initChatbotSocket } from './sockets/initChatbotSocket.js';
 
 // Khởi tạo app và server
 const app = express();
@@ -65,6 +66,8 @@ app.use('/api/combo', ComboRouter);
 app.use('/api/booking', BookingRouter); // Thêm route booking nếu có
 app.use('/uploads', express.static('uploads'));
 app.use('/api/payos', PaymentRouter);
+
+initChatbotSocket(io);
 
 // Lắng nghe socket
 io.on('connection', (socket) => {

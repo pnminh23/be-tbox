@@ -8,6 +8,8 @@ import mongoose from 'mongoose';
 import { formatString } from '../services/formatString.js';
 import { generateBookingId } from '../services/booking.js';
 import { generateMailBooking } from '../services/generateEmail.js';
+import accountModel from '../models/accountModel.js';
+import dayjs from 'dayjs';
 
 export function generateMailOptions({ to, subject, title, message, otp }) {
     return {
@@ -47,6 +49,7 @@ export const createBooking = async (req, res) => {
         const existingBooking = await bookingModel.findOne({
             room: room,
             time_slots: { $in: time_slots },
+            status: { $in: ['THÀNH CÔNG', 'HOÀN THÀNH'] },
             date: { $gte: startOfDay, $lte: endOfDay },
         });
         if (existingBooking) return res.status(400).json({ success: false, message: 'Đã có người đặt!' });
@@ -106,13 +109,6 @@ export const createBooking = async (req, res) => {
             total_money = pricePerMinute * totalMinutes * (1 - discountPercent / 100);
         }
 
-        if (total_money > 300000) {
-            return res.status(403).json({
-                success: false,
-                message: `Tổng tiền của bạn là ${total_money} cần thanh toán trước 50% để đặt phòng `,
-            });
-        }
-
         const cleanedPromotion = promotion === '' ? null : promotion;
         const cleanedCombo = combo === '' ? null : combo;
 
@@ -133,6 +129,11 @@ export const createBooking = async (req, res) => {
             combo: cleanedCombo,
         });
 
+        if (total_money > 150000) {
+            newBooking.status = 'KHÔNG THÀNH CÔNG';
+            await newBooking.save();
+        }
+
         let query = bookingModel
             .findById(newBooking._id)
             .populate({
@@ -143,18 +144,15 @@ export const createBooking = async (req, res) => {
             .populate('film');
 
         if (newBooking.promotion) {
-            query = query.populate('promotions');
+            query = query.populate('promotion');
         }
 
         if (newBooking.combo) {
             query = query.populate({ path: 'combo' });
         }
 
-        const result = await query; // Nếu muốn lấy luôn chi tiết khung giờ
+        const result = await query;
 
-        // Broadcast event cho tất cả client
-
-        // Broadcast event cho tất cả client
         try {
             const mailOptions = generateMailBooking({
                 to: email,
@@ -164,7 +162,7 @@ export const createBooking = async (req, res) => {
                 booking: result,
             });
 
-            console.log('✅ mailOptions:', mailOptions); // Xem thử có gì bên trong
+            // console.log('✅ mailOptions:', mailOptions); // Xem thử có gì bên trong
             await transporter.sendMail(mailOptions);
         } catch (error) {
             return res.status(400).json({
@@ -172,8 +170,21 @@ export const createBooking = async (req, res) => {
                 message: `Lỗi gửi email`,
             });
         }
+
+        if (total_money > 150000) {
+            return res.status(200).json({
+                success: true,
+                paymentRequired: true,
+                message: `Đơn hàng của bạn là ${result.total_money} cần thanh toán ${
+                    result.total_money / 2
+                } để hoàn tất đặt phòng`,
+                money: result.total_money / 2,
+                data: result,
+            });
+        }
+
         req.io.emit('newBooking', newBooking);
-        console.log(newBooking);
+        // console.log(newBooking);
 
         return res.status(200).json({ message: 'Đặt phòng thành công! Email đã được gửi đến bạn', data: result });
     } catch (error) {
@@ -222,16 +233,16 @@ export const getBookedTimeSlotsByRoom = async (req, res) => {
     }
 };
 
-export const getBookedByID = async (req, res) => {
-    const { id_booking } = req.params;
+export const getBookedByOrderCode = async (req, res) => {
+    const { orderCode } = req.params;
 
-    if (!id_booking) {
-        return res.status(400).json({ success: false, message: 'Vui lòng cung cấp id_booking' });
+    if (!orderCode) {
+        return res.status(400).json({ success: false, message: 'Vui lòng cung cấp orderCode' });
     }
 
     try {
         let booking = await bookingModel
-            .findOne({ id_booking })
+            .findOne({ orderCode })
             .populate({
                 path: 'room',
                 populate: [{ path: 'type' }, { path: 'branch' }],
@@ -259,6 +270,220 @@ export const getBookedByID = async (req, res) => {
         return res.status(500).json({ success: false, error: error.message });
     }
 };
+
+export const getBookedByEmail = async (req, res) => {
+    const { accountId } = req.body;
+    const user = await accountModel.findById({ _id: accountId });
+    const email = user.email;
+
+    if (!accountId) {
+        return res.status(400).json({ success: false, message: 'Không có tài khoản' });
+    }
+
+    try {
+        let booking = await bookingModel
+            .findOne({ email })
+            .populate({
+                path: 'room',
+                populate: [{ path: 'type' }, { path: 'branch' }],
+            })
+            .populate('time_slots')
+            .populate('film');
+
+        if (!booking) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
+        }
+
+        if (booking.promotion) {
+            booking = await booking.populate('promotions');
+        }
+
+        if (booking.combo) {
+            booking = await booking.populate('combo');
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: booking,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+export const getCurrentActiveRoomsWithBookingId = async (req, res) => {
+    try {
+        const now = dayjs();
+        const todayStart = now.startOf('day').toDate();
+        const todayEnd = now.endOf('day').toDate();
+
+        // Tìm các booking trong ngày hôm nay có trạng thái thành công hoặc hoàn thành
+        const bookings = await bookingModel
+            .find({
+                date: { $gte: todayStart, $lte: todayEnd },
+                status: { $in: ['THÀNH CÔNG', 'HOÀN THÀNH'] },
+            })
+            .populate('time_slots')
+            .populate('room');
+
+        const currentTime = now.format('HH:mm');
+        const activeRooms = [];
+
+        bookings.forEach((booking) => {
+            const isActive = booking.time_slots.some((slot) => {
+                return currentTime >= slot.start_time && currentTime < slot.end_time;
+            });
+
+            if (isActive) {
+                activeRooms.push({
+                    roomId: booking.room._id,
+                    bookingId: booking._id,
+                });
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: activeRooms,
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: 'Đã xảy ra lỗi',
+            error: error.message,
+        });
+    }
+};
+
+export const getBookedById = async (req, res) => {
+    const { _id } = req.params;
+
+    if (!_id) {
+        return res.status(400).json({ success: false, message: 'Vui lòng cung cấp _id' });
+    }
+
+    try {
+        let booking = await bookingModel
+            .findOne({ _id })
+            .populate({
+                path: 'room',
+                populate: [{ path: 'type' }, { path: 'branch' }],
+            })
+            .populate('time_slots')
+            .populate('film');
+
+        if (!booking) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
+        }
+
+        if (booking.promotion) {
+            booking = await booking.populate('promotions');
+        }
+
+        if (booking.combo) {
+            booking = await booking.populate('combo');
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: booking,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+export const getBookedByEmailCurrent = async (req, res) => {
+    const { accountId } = req.body;
+
+    const user = await accountModel.findById({ _id: accountId });
+    const email = user.email;
+
+    if (!accountId) {
+        return res.status(400).json({ success: false, message: 'Không có tài khoản' });
+    }
+
+    try {
+        const todayStart = dayjs().startOf('day').toDate(); // 00:00 hôm nay
+        const todayEnd = dayjs().endOf('day').toDate(); // 23:59:59 hôm nay
+        let bookings = await bookingModel
+            .find({ email, status: { $ne: 'HOÀN THÀNH' }, date: { $gte: todayStart, $lte: todayEnd } })
+            .populate({
+                path: 'room',
+                populate: [{ path: 'type' }, { path: 'branch' }],
+            })
+            .populate('time_slots')
+            .populate('film');
+
+        if (!bookings) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy s' });
+        }
+
+        if (bookings.promotion) {
+            bookings = await bookings.populate('promotions');
+        }
+
+        if (bookings.combo) {
+            bookings = await bookings.populate('combo');
+        }
+
+        // console.log('bookings: ', bookings);
+        if (!bookings || bookings.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không có đơn đặt nào chưa hoàn thành' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: bookings,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+export const getBookedByEmailAndMonth = async (req, res) => {
+    const { email } = req.params;
+    const { month, year } = req.query; // ví dụ: month=5, year=2025
+
+    if (!email || !month || !year) {
+        return res.status(400).json({ success: false, message: 'Vui lòng cung cấp email, month và year' });
+    }
+
+    try {
+        const monthInt = parseInt(month);
+        const yearInt = parseInt(year);
+
+        // Lấy ngày đầu và cuối tháng
+        const startDate = new Date(yearInt, monthInt - 1, 1); // tháng trong JS tính từ 0
+        const endDate = new Date(yearInt, monthInt, 0, 23, 59, 59, 999); // ngày cuối cùng của tháng
+
+        const bookings = await bookingModel
+            .find({
+                email,
+                date: { $gte: startDate, $lte: endDate },
+            })
+            .populate({
+                path: 'room',
+                populate: [{ path: 'type' }, { path: 'branch' }],
+            })
+            .populate('time_slots')
+            .populate('film')
+            .populate('promotion')
+            .populate('combo');
+
+        if (!bookings.length) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy đơn nào trong tháng' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: bookings,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 export const editBooking = async (req, res) => {
     const { id_booking } = req.params;
     const { isPay, status } = req.body;
@@ -275,6 +500,9 @@ export const editBooking = async (req, res) => {
             { isPay: isPayFormat, status: statusFormat },
             { new: true } // trả về bản ghi sau khi cập nhật
         );
+        if (statusFormat === 'THÀNH CÔNG') {
+            req.io.emit('editBooking', updatedBooking);
+        }
 
         return res.status(200).json({
             success: true,
@@ -283,5 +511,55 @@ export const editBooking = async (req, res) => {
         });
     } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+export const getBookingStatsByEmail = async (req, res) => {
+    const { accountId } = req.body;
+
+    const user = await accountModel.findById({ _id: accountId });
+    const email = user.email;
+    // console.log('user: ', user);
+    // console.log('email: ', email);
+
+    if (!accountId) {
+        return res.status(400).json({ success: false, message: 'Không có tài khoản' });
+    }
+
+    try {
+        const todayStart = dayjs().startOf('day').toDate(); // 00:00 hôm nay
+        const todayEnd = dayjs().endOf('day').toDate(); // 23:59:59 hôm nay
+
+        // Tổng số đơn hôm nay của user
+        const totalBookingsToday = await bookingModel.countDocuments({
+            email,
+            date: { $gte: todayStart, $lte: todayEnd },
+        });
+        // console.log('totalBookingsToday: ', totalBookingsToday);
+
+        const completedBookingsToday = await bookingModel.countDocuments({
+            email,
+            status: 'HOÀN THÀNH',
+        });
+
+        const cancelledBookingsToday = await bookingModel.countDocuments({
+            email,
+            status: 'HỦY',
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                totalBookingsToday,
+                completedBookingsToday,
+                cancelledBookingsToday,
+            },
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: 'Lỗi khi thống kê đơn hàng hôm nay',
+            error: error.message,
+        });
     }
 };
