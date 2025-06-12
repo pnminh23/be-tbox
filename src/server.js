@@ -19,6 +19,8 @@ import { Server } from 'socket.io';
 import http from 'http';
 import PaymentRouter from './routes/paymentRoutes.js';
 import { initChatbotSocket } from './sockets/initChatbotSocket.js';
+import ReviewRouter from './routes/reviewRoutes.js';
+import NewsRouter from './routes/newsRoutes.js';
 
 // Khởi tạo app và server
 const app = express();
@@ -63,6 +65,8 @@ app.use('/api/room', RoomRouter);
 app.use('/api/timeSlots', TimeSlotsRouter);
 app.use('/api/promotion', PromotionRouter);
 app.use('/api/combo', ComboRouter);
+app.use('/api/review', ReviewRouter);
+app.use('/api/news', NewsRouter);
 app.use('/api/booking', BookingRouter); // Thêm route booking nếu có
 app.use('/uploads', express.static('uploads'));
 app.use('/api/payos', PaymentRouter);

@@ -15,7 +15,7 @@ const booking = new mongoose.Schema(
         promotion: { type: mongoose.Schema.Types.ObjectId, ref: 'Promotion' },
         status: {
             type: String,
-            enum: ['THÀNH CÔNG', 'HOÀN THÀNH', 'HỦY', 'KHÔNG THÀNH CÔNG'],
+            enum: ['THÀNH CÔNG', 'HOÀN THÀNH', 'ĐÃ HỦY', 'THẤT BẠI'],
             default: 'THÀNH CÔNG',
         },
         isPay: {
@@ -24,6 +24,8 @@ const booking = new mongoose.Schema(
             default: 'CHƯA THANH TOÁN',
         },
         total_money: { type: Number, required: true },
+        payment_amount: { type: Number, required: true },
+        isReviewed: { type: Boolean, default: false },
     },
     { timestamps: true }
 );

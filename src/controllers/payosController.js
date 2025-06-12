@@ -11,6 +11,9 @@ export const createOrder = async (req, res) => {
     try {
         const { id_booking, email, amount, description, returnUrl, cancelUrl } = req.body;
 
+        console.log('return url: ', returnUrl);
+        console.log('cancle url: ', cancelUrl);
+
         if (!id_booking) {
             return res.status(400).json({ success: false, message: 'Vui lòng cung cấp id_booking' });
         }
@@ -94,20 +97,20 @@ export const handleWebhook = async (req, res) => {
 
         if (amount === booking.total_money) {
             updateData.isPay = 'ĐÃ THANH TOÁN';
+            updateData.status = 'HOÀN THÀNH';
+            updateData.payment_amount = booking.total_money - amount;
         } else if (amount === booking.total_money / 2) {
             updateData.isPay = 'ĐÃ THANH TOÁN 50%';
             updateData.status = 'THÀNH CÔNG';
+            updateData.payment_amount = booking.total_money - amount;
         } else {
-            console.log(`Số tiền không khớp với đơn hàng. Amount: ${amount}, Expected: ${booking.total_money}`);
             return res.status(400).json({ message: 'Amount does not match any valid payment status' });
         }
 
         const updatedBooking = await bookingModel.findByIdAndUpdate(booking._id, updateData, { new: true });
 
-        console.log(`Đã cập nhật đơn ${orderCode} với trạng thái thanh toán: ${updateData.isPay}`);
         return res.status(200).json({ message: 'Webhook processed successfully', booking: updatedBooking });
     } catch (error) {
-        console.error('Webhook xử lý lỗi:', error);
         res.status(500).json({ error: error.message });
     }
 };

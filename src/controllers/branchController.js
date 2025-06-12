@@ -53,7 +53,7 @@ export const getAllBranch = async (req, res) => {
     try {
         const branches = await branchModel.find({}).populate('typeRoom').lean(); // cần .lean() để chỉnh sửa object trả về
 
-        const allRooms = await roomModel.find({}).lean();
+        const allRooms = await roomModel.find({}).populate('type').lean();
 
         // Gắn rooms vào từng branch
         const branchesWithRooms = branches.map((branch) => {

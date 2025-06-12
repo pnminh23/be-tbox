@@ -13,7 +13,7 @@ import {
 import { createUploadMiddleware } from '../middlewares/uploadMiddleware.js';
 const FilmRouter = express.Router();
 
-const uploadAvatar = createUploadMiddleware('films', 'name');
+const uploadAvatar = createUploadMiddleware('films', '');
 
 FilmRouter.get('/get-all', getAllFilms);
 FilmRouter.get('/get-films-by-current-year', getFilmsByCurrentYear);

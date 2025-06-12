@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs/promises'; // dùng promise-based API
 import { formatString } from '../services/formatString.js';
 import bookingModel from '../models/bookingModel.js';
+import { ensureDirectoryExistence } from '../services/ensureDirectoryExistence.js';
 
 const normalizeCategory = (str) => {
     return str
@@ -31,9 +32,9 @@ export const createFilm = async (req, res) => {
             // Nếu film đã có ảnh cũ → xóa ảnh cũ
 
             // Quy tắc đặt tên file: 'avatar_email.jpg'
-            const namePrefix = nameEnglish.replace(/[^a-zA-Z0-9]/g, '_');
+            const timestamp = Date.now();
 
-            const newFilename = `film_${namePrefix}${path.extname(req.file.originalname)}`;
+            const newFilename = `film_${timestamp}${path.extname(req.file.originalname)}`;
 
             // Lưu thông tin file
             const folder = 'films'; // Ví dụ folder avatar
@@ -249,30 +250,34 @@ export const editFilms = async (req, res) => {
         }
 
         if (req.file) {
-            console.log('New uploaded file:', req.file);
-
             if (film.image) {
                 try {
-                    await fs.unlink(film.image);
-                } catch (err) {
-                    console.error('Failed to delete old image:', err);
+                    const oldImagePublicPath = film.image.replace(/^https?:\/\/[^/]+\//, ''); // Bỏ http://localhost:port/
+                    const oldImageLocalPath = path.join('uploads', oldImagePublicPath);
+                    try {
+                        await fs.access(oldImageLocalPath);
+                        await fs.unlink(oldImageLocalPath);
+                    } catch (accessError) {
+                        if (accessError.code === 'ENOENT') {
+                            console.log(`Ảnh cũ không tồn tại, không cần xóa: ${oldImageLocalPath}`);
+                        } else {
+                            throw accessError; // Ném lỗi khác nếu không phải ENOENT
+                        }
+                    }
+                } catch (deleteError) {
+                    console.error('Lỗi khi xóa ảnh cũ:', deleteError);
+                    // Quyết định xem có nên dừng lại ở đây hay tiếp tục lưu ảnh mới
+                    // return res.status(500).json({ message: 'Lỗi khi xóa ảnh cũ.', error: deleteError.message });
                 }
             }
 
-            const namePrefix = film.nameEnglish.replace(/[^a-zA-Z0-9]/g, '_');
-
-            const newFilename = `film_${namePrefix}${path.extname(req.file.originalname)}`;
-
-            // Lưu thông tin file
-            const folder = 'films'; // Ví dụ folder avatar
-            const fileInfo = {
-                filename: newFilename,
-                folder: folder,
-                path: path.join('uploads', folder, newFilename), // Lưu đường dẫn đầy đủ
-            };
-
-            // Di chuyển file vào thư mục và đổi tên
-            await fs.rename(req.file.path, fileInfo.path);
+            const timestamp = Date.now();
+            const newFilename = `film_${timestamp}${path.extname(req.file.originalname)}`;
+            const folder = 'uploads/films'; // Ví dụ folder avatar
+            const newImageLocalPath = path.join(folder, newFilename);
+            await ensureDirectoryExistence(newImageLocalPath);
+            await fs.rename(req.file.path, newImageLocalPath);
+            film.image = `http://localhost:2911/${folder.replace(/\\/g, '/')}/${newFilename}`;
         }
 
         await film.save(); // Lưu thay đổi vào database

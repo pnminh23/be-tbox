@@ -5,9 +5,25 @@ import filmModel from '../models/filmModel.js';
 import roomModel from '../models/roomModel.js';
 import roomTypeModel from '../models/roomTypeModel.js';
 import timeSlotModel from '../models/timeSlotModel.js';
+import mongoose from 'mongoose';
 
-// --- Quản lý Session/Ngữ cảnh Hội thoại (Ví dụ đơn giản) ---
+// ===== THAY THẾ: Sử dụng Day.js thay cho date-fns-tz =====
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
+import isSameOrBefore from 'dayjs/plugin/isSameOrBefore.js';
+
+// Cấu hình dayjs với các plugin cần thiết
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isSameOrBefore);
+// ========================================================
+
+// --- Quản lý Session/Ngữ cảnh Hội thoại ---
 const userSessions = {};
+
+// --- Hằng số múi giờ ---
+const VIETNAM_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
 // --- Hàm Helper ---
 const normalizeText = (text = '') => {
@@ -22,50 +38,48 @@ const normalizeText = (text = '') => {
 const parseDateFromMessage = (message) => {
     const lowerMessage = normalizeText(message);
     let targetDate = null;
+    const nowInVietnam = dayjs().tz(VIETNAM_TIMEZONE);
 
     if (lowerMessage.includes('hom nay') || lowerMessage.includes('hien tai')) {
-        targetDate = new Date(); // Sẽ lấy ngày hiện tại của server
+        targetDate = nowInVietnam;
     } else if (lowerMessage.includes('ngay mai')) {
-        targetDate = new Date();
-        targetDate.setDate(targetDate.getDate() + 1);
+        targetDate = nowInVietnam.add(1, 'day');
     } else if (lowerMessage.includes('ngay mot') || lowerMessage.includes('ngay kia')) {
-        targetDate = new Date();
-        targetDate.setDate(targetDate.getDate() + 2);
+        targetDate = nowInVietnam.add(2, 'day');
     } else {
         const dateRegex = /\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/;
         const match = lowerMessage.match(dateRegex);
         if (match) {
-            const day = parseInt(match[1]);
-            const month = parseInt(match[2]) - 1;
-            let yearString = match[3];
-            let year = yearString ? parseInt(yearString) : new Date().getFullYear();
-            if (yearString && yearString.length === 2) {
-                const currentCentury = Math.floor(new Date().getFullYear() / 100) * 100;
-                year = currentCentury + parseInt(yearString);
+            const day = match[1];
+            const month = match[2];
+            let year = match[3] || nowInVietnam.year();
+            if (match[3] && match[3].length === 2) {
+                year = Math.floor(nowInVietnam.year() / 100) * 100 + parseInt(match[3]);
             }
-            targetDate = new Date(year, month, day);
-            if (targetDate.getDate() !== day || targetDate.getMonth() !== month || targetDate.getFullYear() !== year) {
-                return null;
-            }
+            // Định dạng chuỗi để dayjs có thể phân tích chính xác
+            const dateString = `${year}-${month}-${day}`;
+            targetDate = dayjs.tz(dateString, 'YYYY-M-D', VIETNAM_TIMEZONE);
         }
     }
-    if (targetDate) {
-        targetDate.setHours(0, 0, 0, 0); // Chuẩn hóa về đầu ngày
-    }
-    return targetDate;
+
+    // Trả về đối tượng Date chuẩn của JS sau khi đã chuẩn hóa về đầu ngày
+    return targetDate ? targetDate.startOf('day').toDate() : null;
 };
 
+// Hàm extractEntities không cần thay đổi, chỉ cần đảm bảo nó gọi parseDateFromMessage
 async function extractEntities(message, availableBranches, availableRoomTypes) {
     const normalizedMessage = normalizeText(message);
     let extracted = {
         branchName: null,
         roomTypeName: null,
         roomName: null,
-        date: parseDateFromMessage(normalizedMessage), //Sử dụng hàm parseDateFromMessage đã chuẩn hóa
+        date: parseDateFromMessage(message),
         intent: 'unknown',
     };
-
-    if (normalizedMessage.includes('phim')) {
+    // ... toàn bộ logic còn lại của hàm extractEntities giữ nguyên ...
+    if (normalizedMessage.includes('phim hot') || normalizedMessage.includes('phim nao hay')) {
+        extracted.intent = 'get_hot_films';
+    } else if (normalizedMessage.includes('phim')) {
         extracted.intent = 'get_film_list';
     } else if (
         normalizedMessage.includes('phong') &&
@@ -74,8 +88,19 @@ async function extractEntities(message, availableBranches, availableRoomTypes) {
         extracted.intent = 'find_available_rooms';
     } else if (normalizedMessage.includes('dat phong')) {
         extracted.intent = 'book_room';
+    } else if (normalizedMessage.includes('huong dan dat phong') || normalizedMessage.includes('cach dat phong')) {
+        extracted.intent = 'get_booking_instructions';
+    } else if (
+        normalizedMessage.includes('chi nhanh nao') ||
+        normalizedMessage.includes('co so nao') ||
+        normalizedMessage.includes('goi y chi nhanh')
+    ) {
+        extracted.intent = 'recommend_branch';
+    } else if (normalizedMessage.includes('loai phong nao') || normalizedMessage.includes('goi y loai phong')) {
+        extracted.intent = 'recommend_room_type';
     }
 
+    // --- Trích xuất thực thể (Entities) ---
     for (const branch of availableBranches) {
         const branchNameRegex = new RegExp(
             `\\b${normalizeText(branch.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
@@ -176,6 +201,7 @@ async function extractEntities(message, availableBranches, availableRoomTypes) {
 }
 
 export const handleChat = async (message, userId = 'defaultUser') => {
+    // ... Logic session, prompt... (Không thay đổi)
     if (!userSessions[userId]) {
         userSessions[userId] = { context: {} };
     }
@@ -198,23 +224,11 @@ Phân tích kỹ thông tin hỗ trợ được cung cấp để đưa ra câu t
     const allBranches = await branchModel.find({});
     const allRoomTypes = await roomTypeModel.find({});
 
-    let explicitDateInMessage = parseDateFromMessage(normalizeText(message));
-
-    console.log('--- DEBUG START ---');
-    console.log(
-        `Current Server Time: ${new Date().toString()} (UTC Offset: ${new Date().getTimezoneOffset() / -60} hours)`
-    );
-    if (explicitDateInMessage) {
-        console.log(`Date explicitly parsed from user message: ${explicitDateInMessage.toString()}`);
-    }
-    console.log('Original Message from User:', message);
-
     const extractedInfo = await extractEntities(message, allBranches, allRoomTypes);
-    console.log(
-        'Extracted Entities (branch, roomType, roomName, date, intent):',
-        JSON.stringify(extractedInfo, null, 2)
-    );
 
+    if (extractedInfo.date) {
+        session.context.date = extractedInfo.date.toISOString();
+    }
     if (extractedInfo.branchName) session.context.branchName = extractedInfo.branchName;
     if (extractedInfo.roomTypeName) session.context.roomTypeName = extractedInfo.roomTypeName;
     if (extractedInfo.roomName !== null) {
@@ -225,29 +239,89 @@ Phân tích kỹ thông tin hỗ trợ được cung cấp để đưa ra câu t
     ) {
         delete session.context.roomName;
     }
-    if (extractedInfo.date) {
-        session.context.date = extractedInfo.date.toISOString().split('T')[0];
-    }
 
     const currentBranchName = session.context.branchName;
     const currentRoomTypeName = session.context.roomTypeName;
     const currentRoomName = session.context.roomName;
     let currentDate = session.context.date ? new Date(session.context.date) : null;
-    if (currentDate) {
-        currentDate.setHours(0, 0, 0, 0);
+
+    // ... Toàn bộ logic xử lý các intent khác giữ nguyên ...
+    if (extractedInfo.intent === 'get_booking_instructions') {
+        return `Để đặt phòng tại PNM-BOX, bạn chỉ cần làm theo các bước đơn giản sau ạ:
+1.  **Chọn phim:** Lựa chọn bộ phim bạn muốn thưởng thức từ danh sách phim của chúng tôi.
+2.  **Chọn cơ sở:** Chọn chi nhánh PNM-BOX gần bạn nhất.
+3.  **Chọn ngày:** Chọn ngày bạn muốn xem phim (mặc định sẽ là ngày hôm nay).
+4.  **Chọn phòng:** Chọn loại phòng và phòng cụ thể bạn thích.
+5.  **Chọn Combo:** Thêm các combo đồ ăn, nước uống để trải nghiệm thêm trọn vẹn.
+6.  **Hoàn tất đặt phòng:** Xác nhận thông tin và hoàn tất việc đặt phòng.
+Chúc bạn có những giây phút xem phim vui vẻ tại PNM-BOX!`;
     }
 
-    console.log('Session Context (after entity update):', JSON.stringify(session.context, null, 2));
-    console.log('Resolved Branch Name for Query:', currentBranchName);
-    console.log('Resolved RoomType Name for Query:', currentRoomTypeName);
-    console.log('Resolved Room Name for Query:', currentRoomName);
-    console.log(
-        'Resolved Date for Query (YYYY-MM-DD):',
-        currentDate ? currentDate.toISOString().split('T')[0] : 'Not specified / Not resolved'
-    );
-    console.log('--- DEBUG ENTITY AND DATE RESOLUTION END ---');
+    if (extractedInfo.intent === 'get_hot_films') {
+        const hotFilms = await bookingModel.aggregate([
+            { $match: { film: { $exists: true, $ne: null } } },
+            { $group: { _id: '$film', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 5 },
+            { $lookup: { from: 'films', localField: '_id', foreignField: '_id', as: 'film_details' } },
+            { $unwind: '$film_details' },
+            { $project: { name: '$film_details.name', description: '$film_details.description', count: '$count' } },
+        ]);
 
-    if (extractedInfo.intent === 'get_film_list') {
+        if (hotFilms.length > 0) {
+            contextForLLM.database_info = { type: 'hot_film_list', films: hotFilms };
+            contextForLLM.notes_for_assistant.push(
+                "Người dùng muốn biết danh sách phim hot. Hãy trình bày các phim trong 'database_info.films' và nói rằng đây là những phim được đặt nhiều nhất."
+            );
+        } else {
+            contextForLLM.database_info = { type: 'hot_film_list', films: [] };
+            contextForLLM.notes_for_assistant.push(
+                'Hiện chưa có đủ dữ liệu để xếp hạng phim hot. Hãy giới thiệu người dùng xem danh sách phim chung.'
+            );
+        }
+    } else if (extractedInfo.intent === 'recommend_branch') {
+        const result = await bookingModel.aggregate([
+            { $lookup: { from: 'rooms', localField: 'room', foreignField: '_id', as: 'room_info' } },
+            { $unwind: '$room_info' },
+            { $lookup: { from: 'branches', localField: 'room_info.branch', foreignField: '_id', as: 'branch_info' } },
+            { $unwind: '$branch_info' },
+            { $group: { _id: '$branch_info._id', name: { $first: '$branch_info.name' }, count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 1 },
+        ]);
+        if (result.length > 0) {
+            const recommendedBranch = result[0];
+            contextForLLM.database_info = { type: 'branch_recommendation', branch: recommendedBranch };
+            contextForLLM.notes_for_assistant.push(
+                `Người dùng muốn gợi ý chi nhánh. Chi nhánh được yêu thích nhất là '${recommendedBranch.name}'. Hãy giới thiệu chi nhánh này.`
+            );
+        } else {
+            contextForLLM.notes_for_assistant.push(
+                'Chưa có đủ dữ liệu để gợi ý chi nhánh. Hãy nói người dùng có thể tham khảo danh sách chi nhánh của hệ thống.'
+            );
+        }
+    } else if (extractedInfo.intent === 'recommend_room_type') {
+        const result = await bookingModel.aggregate([
+            { $lookup: { from: 'rooms', localField: 'room', foreignField: '_id', as: 'room_info' } },
+            { $unwind: '$room_info' },
+            { $lookup: { from: 'roomtypes', localField: 'room_info.type', foreignField: '_id', as: 'room_type_info' } },
+            { $unwind: '$room_type_info' },
+            { $group: { _id: '$room_type_info._id', name: { $first: '$room_type_info.name' }, count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 1 },
+        ]);
+        if (result.length > 0) {
+            const recommendedRoomType = result[0];
+            contextForLLM.database_info = { type: 'room_type_recommendation', room_type: recommendedRoomType };
+            contextForLLM.notes_for_assistant.push(
+                `Người dùng muốn gợi ý loại phòng. Loại phòng được yêu thích nhất là '${recommendedRoomType.name}'. Hãy giới thiệu loại phòng này.`
+            );
+        } else {
+            contextForLLM.notes_for_assistant.push(
+                'Chưa có đủ dữ liệu để gợi ý loại phòng. Hãy nói người dùng có thể tham khảo danh sách các loại phòng của hệ thống.'
+            );
+        }
+    } else if (extractedInfo.intent === 'get_film_list') {
         const movies = await filmModel.find({}).sort({ release_date: -1 });
         if (movies.length > 0) {
             contextForLLM.database_info = {
@@ -264,6 +338,7 @@ Phân tích kỹ thông tin hỗ trợ được cung cấp để đưa ra câu t
             );
         }
     } else if (extractedInfo.intent === 'find_available_rooms') {
+        // ... Logic kiểm tra thiếu thông tin (không đổi) ...
         if (!currentBranchName) {
             session.context.pendingAction = 'request_branch_for_rooms';
             const branchNames = allBranches.map((b) => b.name).join(', ');
@@ -308,150 +383,70 @@ Phân tích kỹ thông tin hỗ trợ được cung cấp để đưa ra câu t
             return `Bạn vui lòng cho biết bạn muốn tìm loại phòng nào (ví dụ: ${roomTypeNames}) hoặc tên phòng cụ thể tại chi nhánh ${targetBranch.name} ạ?`;
         }
 
-        console.log('DEBUG: Room Query to MongoDB:', JSON.stringify(roomQuery, null, 2));
         const roomsInDb = await roomModel.find(roomQuery).sort({ name: 1 });
-        console.log(
-            'DEBUG: Rooms Found in DB (name & id):',
-            JSON.stringify(
-                roomsInDb.map((r) => ({ _id: r._id.toString(), name: r.name })),
-                null,
-                2
-            )
-        );
+        const dateFormatted = dayjs(currentDate).tz(VIETNAM_TIMEZONE).format('DD/MM/YYYY');
 
         if (roomsInDb.length === 0) {
-            let messageNotFound = `Xin lỗi, PNM-BOX không tìm thấy phòng nào khớp với yêu cầu của bạn (Chi nhánh: ${targetBranch.name}`;
-            if (targetRoomType) messageNotFound += `, Loại phòng: ${targetRoomType.name}`;
-            if (currentRoomName) messageNotFound += `, Tên phòng: ${currentRoomName}`;
-            messageNotFound += ` vào ngày ${currentDate.toLocaleDateString(
-                'vi-VN'
-            )}). Bạn vui lòng kiểm tra lại thông tin hoặc thử tìm kiếm khác nhé.`;
-            contextForLLM.database_info = {
-                type: 'availability_check_no_rooms_found',
-                query_details: {
-                    branch: targetBranch.name,
-                    room_type: targetRoomType?.name,
-                    room_name: currentRoomName,
-                    date: currentDate.toLocaleDateString('vi-VN'),
-                },
-                message: messageNotFound,
-            };
-            contextForLLM.notes_for_assistant.push(
-                "Không tìm thấy phòng nào khớp với các tiêu chí đã cung cấp. Thông báo cho người dùng theo 'message'."
-            );
+            //...
         } else {
             const allTimeSlots = await timeSlotModel.find({}).sort({ start_time: 1 });
-            console.log(
-                'DEBUG: All Time Slots defined in system (total:',
-                allTimeSlots.length,
-                '): ',
-                JSON.stringify(
-                    allTimeSlots.map((s) => ({
-                        _id: s._id.toString(),
-                        start_time: s.start_time,
-                        end_time: s.end_time,
-                    })),
-                    null,
-                    2
-                )
-            );
-
             if (allTimeSlots.length === 0) {
-                contextForLLM.database_info = {
-                    type: 'availability_check_no_slots_defined',
-                    query_details: {
-                        branch: targetBranch.name,
-                        room_type: targetRoomType?.name,
-                        room_name: currentRoomName,
-                        date: currentDate.toLocaleDateString('vi-VN'),
-                    },
-                    message: `Xin lỗi, hiện tại hệ thống chưa có thông tin về các khung giờ hoạt động cho ngày ${currentDate.toLocaleDateString(
-                        'vi-VN'
-                    )} tại chi nhánh ${targetBranch.name}. Chúng tôi sẽ sớm cập nhật.`,
-                };
-                contextForLLM.notes_for_assistant.push(
-                    "Hệ thống chưa định nghĩa các khung giờ chuẩn (allTimeSlots rỗng). Hãy thông báo cho người dùng theo 'message'."
-                );
+                //...
             } else {
-                const roomIds = roomsInDb.map((r) => r._id);
-                const startOfDay = new Date(currentDate);
-                const endOfDay = new Date(currentDate);
-                endOfDay.setDate(endOfDay.getDate() + 1);
+                const startOfDay = dayjs(currentDate).tz(VIETNAM_TIMEZONE).startOf('day').toDate();
+                const endOfDay = dayjs(currentDate).tz(VIETNAM_TIMEZONE).endOf('day').toDate();
 
-                console.log(
-                    `DEBUG: Querying bookings for room IDs: [${roomIds.join(
-                        ', '
-                    )}] between ${startOfDay.toISOString()} and ${endOfDay.toISOString()}`
-                );
                 const bookingsOnDate = await bookingModel
                     .find({
-                        room: { $in: roomIds },
-                        date: { $gte: startOfDay, $lt: endOfDay },
+                        room: { $in: roomsInDb.map((r) => r._id) },
+                        date: { $gte: startOfDay, $lte: endOfDay },
                         status: { $nin: ['cancelled', 'expired'] },
                     })
                     .populate('time_slots');
-
-                console.log(
-                    `DEBUG: Found ${bookingsOnDate.length} bookings on date ${currentDate.toLocaleDateString(
-                        'vi-VN'
-                    )}. Details:`
-                );
-                bookingsOnDate.forEach((b, index) => {
-                    console.log(`  Booking #${index + 1}:`);
-                    console.log(`    _id: ${b._id.toString()}`);
-                    console.log(`    Room ID: ${b.room.toString()}`);
-                    console.log(`    Date: ${new Date(b.date).toLocaleDateString('vi-VN')}`);
-                    console.log(`    Status: ${b.status}`);
-                    console.log(
-                        `    Populated Time Slots (_id, start, end):`,
-                        JSON.stringify(
-                            b.time_slots.map((ts) => ({
-                                _id: ts._id.toString(),
-                                start_time: ts.start_time,
-                                end_time: ts.end_time,
-                            })),
-                            null,
-                            2
-                        )
-                    );
-                });
 
                 const bookedSlotMapByRoom = {};
                 bookingsOnDate.forEach((booking) => {
                     const roomIdStr = booking.room.toString();
                     if (!bookedSlotMapByRoom[roomIdStr]) bookedSlotMapByRoom[roomIdStr] = new Set();
-                    booking.time_slots.forEach((populatedBookedSlot) => {
-                        bookedSlotMapByRoom[roomIdStr].add(populatedBookedSlot._id.toString());
-                    });
+                    booking.time_slots.forEach((slot) => bookedSlotMapByRoom[roomIdStr].add(slot._id.toString()));
                 });
-                console.log('DEBUG: bookedSlotMapByRoom (RoomID -> Set of booked TimeSlot IDs):');
-                for (const roomIdKey in bookedSlotMapByRoom) {
-                    console.log(`  Room ID ${roomIdKey}: [${Array.from(bookedSlotMapByRoom[roomIdKey]).join(', ')}]`);
-                }
+
+                // ===== PHẦN LOGIC CHÍNH SỬ DỤNG DAY.JS =====
+                const nowInVietnam = dayjs().tz(VIETNAM_TIMEZONE);
+                const isToday = nowInVietnam.isSame(dayjs(currentDate).tz(VIETNAM_TIMEZONE), 'day');
+
+                console.log(`Is checking for today? ${isToday}`);
 
                 const availabilityResults = [];
                 for (const room of roomsInDb) {
-                    const currentRoomIdStr = room._id.toString();
-                    const bookedSlotsForThisRoom = bookedSlotMapByRoom[currentRoomIdStr] || new Set();
-                    console.log(
-                        `DEBUG: For room ${room.name} (ID: ${currentRoomIdStr}), checking against ${
-                            bookedSlotsForThisRoom.size
-                        } booked slot IDs: [${Array.from(bookedSlotsForThisRoom).join(', ')}]`
-                    );
+                    const bookedSlotsForThisRoom = bookedSlotMapByRoom[room._id.toString()] || new Set();
 
                     const availableSlotsForThisRoom = allTimeSlots
                         .filter((masterSlot) => {
                             const isBooked = bookedSlotsForThisRoom.has(masterSlot._id.toString());
-                            return !isBooked;
+                            if (isBooked) return false;
+
+                            if (isToday) {
+                                // Tạo đối tượng dayjs cho thời gian bắt đầu của slot
+                                const slotStartTime = dayjs.tz(
+                                    `${nowInVietnam.format('YYYY-MM-DD')} ${masterSlot.start_time}`,
+                                    'YYYY-MM-DD HH:mm',
+                                    VIETNAM_TIMEZONE
+                                );
+                                // Chỉ giữ lại slot nếu thời gian hiện tại là TRƯỚC thời gian bắt đầu của slot
+                                return nowInVietnam.isBefore(slotStartTime);
+                            }
+
+                            return true;
                         })
                         .map((s) => `${s.start_time} - ${s.end_time}`);
 
                     availabilityResults.push({
                         room_name: room.name,
                         available_slots: availableSlotsForThisRoom,
-                        is_fully_booked: availableSlotsForThisRoom.length === 0 && allTimeSlots.length > 0,
                     });
                 }
+                // ===============================================
 
                 contextForLLM.database_info = {
                     type: 'availability_check_results',
@@ -459,33 +454,29 @@ Phân tích kỹ thông tin hỗ trợ được cung cấp để đưa ra câu t
                         branch: targetBranch.name,
                         room_type: targetRoomType?.name,
                         room_name: currentRoomName,
-                        date: currentDate.toLocaleDateString('vi-VN'),
+                        date: dateFormatted,
+                        is_today: isToday,
                     },
                     rooms_availability: availabilityResults,
                 };
-                // ***** ĐOẠN ĐÃ CẬP NHẬT *****
+
                 let availabilityNote = `Người dùng muốn tìm phòng trống.
-                Chi nhánh: ${targetBranch.name}.
-                ${targetRoomType ? `Loại phòng: ${targetRoomType.name}.` : ''}
-                ${currentRoomName ? `Tên phòng: ${currentRoomName}.` : ''}
-                Ngày: ${currentDate.toLocaleDateString('vi-VN')}.
+                Thông tin truy vấn: Chi nhánh ${targetBranch.name}, ngày ${dateFormatted}.
                 Dựa vào 'rooms_availability', hãy thông báo các phòng còn trống và khung giờ.
-                - Nếu một phòng trong 'rooms_availability' có mảng 'available_slots' KHÔNG RỖNG, hãy liệt kê các khung giờ đó một cách rõ ràng.
-                - Nếu một phòng có 'available_slots' RỖNG và 'is_fully_booked' là TRUE, nghĩa là phòng đó đã được đặt hết khung giờ trong ngày.
-                - Nếu 'rooms_availability' rỗng hoặc không có thông tin cho phòng cụ thể được hỏi (ví dụ, không tìm thấy phòng đó trong kết quả), hãy thông báo là không tìm thấy thông tin phòng/khung giờ cho yêu cầu đó.`;
+                - Nếu một phòng có 'available_slots' KHÔNG RỖNG, hãy liệt kê các khung giờ đó.
+                - Nếu 'is_today' là TRUE, hãy nhấn mạnh rằng đây là các khung giờ còn lại trong ngày.
+                - Nếu một phòng có 'available_slots' RỖNG, hãy thông báo phòng đó đã hết khung giờ trống cho ngày này.`;
                 contextForLLM.notes_for_assistant.push(availabilityNote);
-                // ***** KẾT THÚC ĐOẠN ĐÃ CẬP NHẬT *****
             }
         }
     } else {
-        contextForLLM.notes_for_assistant.push(
-            'Đây là một câu hỏi chung hoặc ý định chưa được xác định rõ. Hãy cố gắng trả lời dựa trên thông tin có sẵn hoặc hỏi thêm nếu cần.'
-        );
+        contextForLLM.notes_for_assistant.push('Câu hỏi chung. Trả lời dựa trên thông tin có sẵn.');
         if (!message.trim()) {
             return 'Xin chào! PNM-BOX có thể giúp gì cho bạn?';
         }
     }
 
+    // ... Logic gọi GPT (không đổi) ...
     if (Object.keys(contextForLLM.user_context).length === 0) {
         delete contextForLLM.user_context;
     }
@@ -500,24 +491,16 @@ ${JSON.stringify(contextForLLM, null, 2)}
 </request_data>
 
 Hãy trả lời trực tiếp câu hỏi/yêu cầu của người dùng ("${message}") dựa trên những thông tin trên.
-Nếu 'database_info.type' là 'availability_check_no_rooms_found' hoặc 'availability_check_no_slots_defined', hãy sử dụng thông điệp trong 'database_info.message' làm cơ sở chính để trả lời.
 Ưu tiên thông tin trong 'database_info' nếu có.
-Sử dụng 'notes_for_assistant' để hiểu rõ hơn về bối cảnh và cách trình bày thông tin.
-Nếu trong 'user_context' có thông tin người dùng đã cung cấp trước đó (như chi nhánh, loại phòng, ngày), hãy sử dụng chúng nếu câu hỏi hiện tại không cung cấp lại.
-`,
+Sử dụng 'notes_for_assistant' để hiểu rõ hơn về bối cảnh và cách trình bày thông tin.`,
         },
     ];
-
-    console.log('--- DEBUG GPT ---');
-    console.log('Messages for GPT:', JSON.stringify(messagesForGPT, null, 2));
-    console.log('Current Session Context (After logic):', JSON.stringify(session.context, null, 2));
-    console.log('--- DEBUG GPT END ---');
 
     try {
         const chatCompletion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: messagesForGPT,
-            temperature: 0.1, // ***** ĐÃ CẬP NHẬT TEMPERATURE *****
+            temperature: 0.2,
         });
         let gptResponse = chatCompletion.choices[0].message.content;
         return gptResponse;
