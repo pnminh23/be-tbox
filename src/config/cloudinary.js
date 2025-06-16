@@ -1,18 +1,26 @@
-import cloudinary from 'cloudinary';
-import { env } from '../config/enviroment.js';
+// src/config/cloudinary.js
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
+import multer from 'multer';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 cloudinary.config({
-    cloud_name: 'dphcnr6ld',
-    api_key: '332881657232433',
-    api_secret: 'KhkQ_pEJpzSmnM-FgEfahG9q3_s',
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-cloudinary.api.ping((error, result) => {
-    if (error) {
-        console.error('Cloudinary connection failed:', error);
-    } else {
-        console.log('Cloudinary connection successful:', result);
-    }
+// Cấu hình storage cho multer-storage-cloudinary
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'pnm-box-images', // Tên thư mục trên Cloudinary bạn muốn lưu ảnh vào
+        allowed_formats: ['jpg', 'png', 'jpeg'], // Các định dạng cho phép
+    },
 });
 
-export default cloudinary;
+const uploader = multer({ storage: storage });
+
+export { cloudinary, uploader };

@@ -4,6 +4,7 @@ import fs from 'fs/promises'; // dùng promise-based API
 import { formatString } from '../services/formatString.js';
 import bookingModel from '../models/bookingModel.js';
 import { ensureDirectoryExistence } from '../services/ensureDirectoryExistence.js';
+import { cloudinary } from '../config/cloudinary.js';
 
 const normalizeCategory = (str) => {
     return str
@@ -19,36 +20,17 @@ const normalizeCategory = (str) => {
 };
 export const createFilm = async (req, res) => {
     const { name, nameEnglish, category, release_date, duration, country } = req.body;
-    let image = '';
 
     if (!name || !nameEnglish || !category || !release_date || !duration || !country)
         return res.status(400).json({ success: false, message: 'Hãy nhập đẩy đủ các trường' });
-
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'Thiếu ảnh' });
+    }
     try {
         const existingFilm = await filmModel.findOne({ name });
         if (existingFilm) return res.status(400).json({ success: false, message: 'Phim này đã tồn tại' });
-
-        if (req.file) {
-            // Nếu film đã có ảnh cũ → xóa ảnh cũ
-
-            // Quy tắc đặt tên file: 'avatar_email.jpg'
-            const timestamp = Date.now();
-
-            const newFilename = `film_${timestamp}${path.extname(req.file.originalname)}`;
-
-            // Lưu thông tin file
-            const folder = 'films'; // Ví dụ folder avatar
-            const fileInfo = {
-                filename: newFilename,
-                folder: folder,
-                path: path.join('uploads', folder, newFilename), // Lưu đường dẫn đầy đủ
-            };
-
-            image = `http://localhost:2911/${fileInfo.path.replace(/\\/g, '/')}`;
-
-            // Di chuyển file vào thư mục và đổi tên
-            await fs.rename(req.file.path, fileInfo.path);
-        }
+        const imageUrl = req.file.path;
+        const publicId = req.file.filename;
 
         const normalizedCategory = Array.isArray(category)
             ? category.map(normalizeCategory)
@@ -60,11 +42,11 @@ export const createFilm = async (req, res) => {
             category: normalizedCategory,
             release_date: formatString(release_date),
             duration: formatString(duration),
-            image,
+            image: imageUrl,
+            imagePublicId: publicId,
             country: formatString(country),
         });
 
-        await newfilm.save();
         return res.status(200).json({ success: true, message: 'Thêm phim thành công' });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -250,34 +232,11 @@ export const editFilms = async (req, res) => {
         }
 
         if (req.file) {
-            if (film.image) {
-                try {
-                    const oldImagePublicPath = film.image.replace(/^https?:\/\/[^/]+\//, ''); // Bỏ http://localhost:port/
-                    const oldImageLocalPath = path.join('uploads', oldImagePublicPath);
-                    try {
-                        await fs.access(oldImageLocalPath);
-                        await fs.unlink(oldImageLocalPath);
-                    } catch (accessError) {
-                        if (accessError.code === 'ENOENT') {
-                            console.log(`Ảnh cũ không tồn tại, không cần xóa: ${oldImageLocalPath}`);
-                        } else {
-                            throw accessError; // Ném lỗi khác nếu không phải ENOENT
-                        }
-                    }
-                } catch (deleteError) {
-                    console.error('Lỗi khi xóa ảnh cũ:', deleteError);
-                    // Quyết định xem có nên dừng lại ở đây hay tiếp tục lưu ảnh mới
-                    // return res.status(500).json({ message: 'Lỗi khi xóa ảnh cũ.', error: deleteError.message });
-                }
+            if (film.imagePublicId) {
+                await cloudinary.uploader.destroy(film.imagePublicId);
             }
-
-            const timestamp = Date.now();
-            const newFilename = `film_${timestamp}${path.extname(req.file.originalname)}`;
-            const folder = 'uploads/films'; // Ví dụ folder avatar
-            const newImageLocalPath = path.join(folder, newFilename);
-            await ensureDirectoryExistence(newImageLocalPath);
-            await fs.rename(req.file.path, newImageLocalPath);
-            film.image = `http://localhost:2911/${folder.replace(/\\/g, '/')}/${newFilename}`;
+            film.image = req.file.path;
+            film.imagePublicId = req.file.filename;
         }
 
         await film.save(); // Lưu thay đổi vào database
@@ -302,14 +261,8 @@ export const deleteFilm = async (req, res) => {
         }
 
         // Xóa ảnh nếu tồn tại
-        if (film.image) {
-            try {
-                // Lấy đường dẫn tương đối từ URL
-                const imagePath = film.image.replace('http://localhost:2911/', '');
-                await fs.unlink(imagePath);
-            } catch (err) {
-                console.error('Lỗi khi xóa ảnh:', err.message);
-            }
+        if (film.imagePublicId) {
+            await cloudinary.uploader.destroy(film.imagePublicId);
         }
 
         // Xóa phim khỏi database

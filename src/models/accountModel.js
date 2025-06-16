@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { type } from 'os';
 
 const accountSchema = new mongoose.Schema(
     {
@@ -7,6 +8,7 @@ const accountSchema = new mongoose.Schema(
         phone: { type: String, required: true },
         password: { type: String, required: true },
         image: { type: String, default: '' },
+        imagePublicId: { type: String, default: '' },
         role: {
             type: String,
             enum: ['user', 'admin', 'employee'],

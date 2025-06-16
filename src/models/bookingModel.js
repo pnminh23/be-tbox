@@ -12,10 +12,10 @@ const booking = new mongoose.Schema(
         room: { type: mongoose.Schema.Types.ObjectId, ref: 'rooms', required: true },
         date: { type: Date, required: true },
         time_slots: [{ type: mongoose.Schema.Types.ObjectId, ref: 'timeSlots', required: true }],
-        promotion: { type: mongoose.Schema.Types.ObjectId, ref: 'Promotion' },
+        promotion: { type: String },
         status: {
             type: String,
-            enum: ['THÀNH CÔNG', 'HOÀN THÀNH', 'ĐÃ HỦY', 'THẤT BẠI'],
+            enum: ['THÀNH CÔNG', 'HOÀN THÀNH', 'ĐÃ HỦY', 'THẤT BẠI', 'CHỜ THANH TOÁN'],
             default: 'THÀNH CÔNG',
         },
         isPay: {

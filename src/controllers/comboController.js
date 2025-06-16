@@ -2,9 +2,9 @@ import comboModel from '../models/comboModel.js';
 import { formatString } from '../services/formatString.js';
 
 export const createCombo = async (req, res) => {
-    let { name, description, types } = req.body;
+    let { name, description, types, duration } = req.body;
 
-    if (!name || !description || !Array.isArray(types) || types.length === 0) {
+    if (!name || !description || !Array.isArray(types) || types.length === 0 || duration === 0) {
         return res.status(400).json({
             success: false,
             message: 'Hãy nhập đầy đủ các trường và ít nhất một loại phòng kèm giá',
@@ -39,6 +39,7 @@ export const createCombo = async (req, res) => {
             name,
             description,
             types,
+            duration,
         });
 
         return res.status(200).json({ success: true, message: 'Thêm combo mới thành công' });

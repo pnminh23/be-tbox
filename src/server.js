@@ -21,6 +21,7 @@ import PaymentRouter from './routes/paymentRoutes.js';
 import { initChatbotSocket } from './sockets/initChatbotSocket.js';
 import ReviewRouter from './routes/reviewRoutes.js';
 import NewsRouter from './routes/newsRoutes.js';
+import { startBookingCleanupJob } from './services/cronJobs.js';
 
 // Khởi tạo app và server
 const app = express();
@@ -68,7 +69,6 @@ app.use('/api/combo', ComboRouter);
 app.use('/api/review', ReviewRouter);
 app.use('/api/news', NewsRouter);
 app.use('/api/booking', BookingRouter); // Thêm route booking nếu có
-app.use('/uploads', express.static('uploads'));
 app.use('/api/payos', PaymentRouter);
 
 initChatbotSocket(io);
@@ -81,6 +81,9 @@ io.on('connection', (socket) => {
         console.log('Client disconnected:', socket.id);
     });
 });
+
+// ✅ BẮT ĐẦU CHẠY TÁC VỤ DỌN DẸP BOOKING QUÁ HẠN
+startBookingCleanupJob(io);
 
 // Lắng nghe port
 const port = env.APP_PORT || 4000;

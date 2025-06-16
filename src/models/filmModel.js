@@ -8,6 +8,8 @@ const filmSchema = new mongoose.Schema(
         release_date: { type: String, required: true },
         duration: { type: String, required: true },
         image: { type: String, default: '' },
+        imagePublicId: { type: String, default: '' },
+
         country: { type: String, default: '' },
     },
     { timestamps: true }

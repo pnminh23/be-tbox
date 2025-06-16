@@ -11,24 +11,6 @@ import { generateMailBooking } from '../services/generateEmail.js';
 import accountModel from '../models/accountModel.js';
 import dayjs from 'dayjs';
 
-export function generateMailOptions({ to, subject, title, message, otp }) {
-    return {
-        from: 'PNM - BOX Cafe phim',
-        to,
-        subject,
-        html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
-                <h2 style="color: #007BFF; text-align: center;">${title}</h2>
-                <p style="font-size: 16px; color: #333;">${message}</p>
-                <div style="background: #f3f3f3; padding: 10px; font-size: 20px; font-weight: bold; text-align: center; border-radius: 5px;">
-                    ${otp}
-                </div>
-                <p style="font-size: 14px; color: #666;">Mã OTP này có hiệu lực trong <b>5 phút</b>.</p>
-            </div>
-        `,
-    };
-}
-
 export const createBooking = async (req, res) => {
     const { name_client, email, phone, room, date, time_slots, film, promotion, status, isPay, combo } = req.body;
     if (!name_client) return res.status(400).json({ success: false, message: 'Chưa có tên khách hàng' });
@@ -79,8 +61,13 @@ export const createBooking = async (req, res) => {
 
         let discountPercent = 0;
         if (promotion) {
-            const promo = await promotionModel.findById(promotion);
+            const promo = await promotionModel.findOne({ name: promotion });
             if (promo) discountPercent = promo.discountPercent || 0;
+            else
+                return res.status(400).json({
+                    success: false,
+                    message: 'Mã giảm giá không hợp lệ',
+                });
         }
 
         let total_money = 0;
@@ -131,7 +118,7 @@ export const createBooking = async (req, res) => {
         });
 
         if (total_money > 150000) {
-            newBooking.status = 'THẤT BẠI';
+            newBooking.status = 'CHỜ THANH TOÁN';
             await newBooking.save();
         }
 
@@ -143,10 +130,6 @@ export const createBooking = async (req, res) => {
             })
             .populate('time_slots')
             .populate('film');
-
-        if (newBooking.promotion) {
-            query = query.populate('promotion');
-        }
 
         if (newBooking.combo) {
             query = query.populate({ path: 'combo' });
@@ -211,7 +194,7 @@ export const getBookedTimeSlotsByRoom = async (req, res) => {
             .find({
                 room: room,
                 date: { $gte: startOfDay, $lte: endOfDay },
-                status: { $in: ['THÀNH CÔNG', 'HOÀN THÀNH'] },
+                status: { $in: ['THÀNH CÔNG', 'HOÀN THÀNH', 'CHỜ THANH TOÁN'] },
             })
             .populate('time_slots');
 
@@ -255,10 +238,6 @@ export const getBookedByOrderCode = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
         }
 
-        if (booking.promotion) {
-            booking = await booking.populate('promotions');
-        }
-
         if (booking.combo) {
             booking = await booking.populate('combo');
         }
@@ -293,10 +272,6 @@ export const getBookedByEmail = async (req, res) => {
 
         if (!booking) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
-        }
-
-        if (booking.promotion) {
-            booking = await booking.populate('promotions');
         }
 
         if (booking.combo) {
@@ -377,10 +352,6 @@ export const getBookedById = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
         }
 
-        if (booking.promotion) {
-            booking = await booking.populate('promotions');
-        }
-
         if (booking.combo) {
             booking = await booking.populate('combo');
         }
@@ -419,10 +390,6 @@ export const getBookedByEmailCurrent = async (req, res) => {
 
         if (!bookings) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy s' });
-        }
-
-        if (bookings.promotion) {
-            bookings = await bookings.populate('promotions');
         }
 
         if (bookings.combo) {
@@ -479,10 +446,6 @@ export const getBookedByEmailAndMonth = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy s' });
         }
 
-        if (bookings.promotion) {
-            bookings = await bookings.populate('promotions');
-        }
-
         if (bookings.combo) {
             bookings = await bookings.populate('combo');
         }
@@ -509,13 +472,10 @@ export const getAllBookings = async (req, res) => {
                 populate: [{ path: 'type' }, { path: 'branch' }],
             })
             .populate('time_slots')
-            .populate('film');
+            .populate('film')
+            .sort({ createdAt: -1 });
         if (!bookings) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
-        }
-
-        if (bookings.promotion) {
-            bookings = await bookings.populate('promotions');
         }
 
         if (bookings.combo) {
@@ -572,11 +532,6 @@ export const editBooking = async (req, res) => {
             .populate('time_slots')
             .populate('film');
 
-        // 2. Populate có điều kiện cho promotion
-        if (updatedBooking.promotion) {
-            query = query.populate('promotion');
-        }
-
         // 3. Populate có điều kiện cho combo
         if (updatedBooking.combo) {
             query = query.populate('combo');
@@ -609,14 +564,12 @@ export const getBookingsByDate = async (req, res) => {
         const bookings = await bookingModel
             .find({ date: { $gte: start, $lte: end } })
             .populate('room')
-            .populate('time_slots');
-        if (bookings.promotion) {
-            query = query.populate('promotion');
-        }
+            .populate('time_slots')
+            .sort({ createdAt: -1 });
 
         // 3. Populate có điều kiện cho combo
         if (bookings.combo) {
-            query = query.populate('combo');
+            bookings = await bookings.populate('combo');
         }
 
         return res.status(200).json({ success: true, data: bookings });
@@ -636,14 +589,12 @@ export const getBookingsByMonth = async (req, res) => {
         const bookings = await bookingModel
             .find({ date: { $gte: start, $lte: end } })
             .populate('room')
-            .populate('time_slots');
-        if (bookings.promotion) {
-            query = query.populate('promotion');
-        }
+            .populate('time_slots')
+            .sort({ createdAt: -1 });
 
         // 3. Populate có điều kiện cho combo
         if (bookings.combo) {
-            query = query.populate('combo');
+            bookings = await bookings.populate('combo');
         }
 
         return res.status(200).json({ success: true, data: bookings });

@@ -7,6 +7,7 @@ const room = new mongoose.Schema(
         name: { type: String, required: true },
         status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
         image: { type: String, default: '' },
+        imagePublicId: { type: String, default: '' },
     },
     { timestamps: true }
 );

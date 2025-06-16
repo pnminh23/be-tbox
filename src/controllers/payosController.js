@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import payos from '../config/payos.js';
 import bookingModel from '../models/bookingModel.js';
 
@@ -10,6 +11,7 @@ function generateOrderCode() {
 export const createOrder = async (req, res) => {
     try {
         const { id_booking, email, amount, description, returnUrl, cancelUrl } = req.body;
+        const expiredAt = dayjs().add(5, 'minute').unix();
 
         console.log('return url: ', returnUrl);
         console.log('cancle url: ', cancelUrl);
@@ -58,6 +60,7 @@ export const createOrder = async (req, res) => {
             description,
             returnUrl,
             cancelUrl,
+            expiredAt,
         });
 
         return res.status(200).json(paymentLink);
