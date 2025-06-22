@@ -185,14 +185,14 @@ async function findAvailableRoomsForTimeRange({ branchId, date, startTime, endTi
 
 export const handleChat = async (message, userId = 'defaultUser') => {
     if (!userSessions[userId]) {
-        userSessions[userId] = { context: {} };
+        userSessions[userId] = { context: {}, lastIntent: null };
     }
     const session = userSessions[userId];
 
     let systemPrompt = `Bạn là trợ lý ảo của PNM-BOX, một hệ thống cafe phim. Hãy luôn trả lời một cách lịch sự, thân thiện, rõ ràng và hữu ích. Khi cung cấp danh sách (phim, phòng, khung giờ), hãy trình bày mỗi mục trên một dòng để dễ đọc. Nếu người dùng hỏi thông tin mà bạn không có hoặc không chắc chắn, hãy thông báo một cách trung thực và đề nghị hỗ trợ thêm. Nếu thiếu thông tin để xử lý yêu cầu, hãy lịch sự hỏi lại người dùng để bổ sung. Phân tích kỹ thông tin hỗ trợ được cung cấp để đưa ra câu trả lời chính xác.`;
+
     let contextForLLM = {
         query: message,
-        user_context: { ...session.context },
         database_info: null,
         notes_for_assistant: [],
     };
@@ -201,13 +201,48 @@ export const handleChat = async (message, userId = 'defaultUser') => {
     const allRoomTypes = await roomTypeModel.find({});
 
     const extractedInfo = await extractEntities(message, allBranches, allRoomTypes);
+    const newIntent = extractedInfo.intent;
+    const lastIntent = session.lastIntent;
+
+    const resetContextIntents = [
+        'get_hot_films',
+        'get_film_list',
+        'get_booking_instructions',
+        'recommend_branch',
+        'recommend_room_type',
+    ];
+
+    if (resetContextIntents.includes(newIntent)) {
+        session.context = {};
+    }
 
     if (extractedInfo.branchName) session.context.branchName = extractedInfo.branchName;
     if (extractedInfo.date) session.context.date = extractedInfo.date.toISOString();
     if (extractedInfo.startTime) session.context.startTime = extractedInfo.startTime;
     if (extractedInfo.endTime) session.context.endTime = extractedInfo.endTime;
 
-    if (extractedInfo.intent === 'find_available_rooms') {
+    contextForLLM.user_context = { ...session.context };
+    session.lastIntent = newIntent;
+
+    if (newIntent === 'get_booking_instructions') {
+        return `Để đặt phòng tại PNM-BOX, bạn chỉ cần làm theo các bước đơn giản sau ạ:\n1. **Chọn phim**\n2. **Chọn cơ sở**\n3. **Chọn ngày**\n4. **Chọn phòng**\n5. **Chọn Combo**\n6. **Hoàn tất đặt phòng**\nChúc bạn có những giây phút xem phim vui vẻ!`;
+    }
+
+    if (newIntent === 'get_hot_films') {
+        const hotFilms = await bookingModel.aggregate([
+            { $match: { film: { $exists: true, $ne: null } } },
+            { $group: { _id: '$film', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 5 },
+            { $lookup: { from: 'films', localField: '_id', foreignField: '_id', as: 'film_details' } },
+            { $unwind: '$film_details' },
+            { $project: { name: '$film_details.name' } },
+        ]);
+        contextForLLM.database_info = { type: 'hot_film_list', films: hotFilms };
+        contextForLLM.notes_for_assistant.push(
+            "Người dùng muốn biết danh sách phim hot. Hãy trình bày các phim trong 'database_info.films'."
+        );
+    } else if (newIntent === 'find_available_rooms') {
         const currentBranchName = session.context.branchName;
 
         if (!currentBranchName) {
@@ -233,7 +268,6 @@ export const handleChat = async (message, userId = 'defaultUser') => {
             effectiveEndTime = '23:30';
             noteForLLM = `Người dùng chỉ cung cấp giờ bắt đầu, đã tự động mặc định tìm kiếm từ ${effectiveStartTime} đến 23:30.`;
         }
-
         if (noteForLLM) {
             contextForLLM.notes_for_assistant.push(noteForLLM);
         }
@@ -290,14 +324,11 @@ export const handleChat = async (message, userId = 'defaultUser') => {
         { role: 'system', content: systemPrompt },
         {
             role: 'user',
-            content: `Dưới đây là thông tin tôi đã thu thập được và yêu cầu của người dùng. Hãy giúp tôi tạo ra một câu trả lời phù hợp:
-<request_data>
-${JSON.stringify(contextForLLM, null, 2)}
-</request_data>
-
-Hãy trả lời trực tiếp câu hỏi/yêu cầu của người dùng ("${message}") dựa trên những thông tin trên.
-Ưu tiên thông tin trong 'database_info' nếu có.
-Sử dụng 'notes_for_assistant' để hiểu rõ hơn về bối cảnh và cách trình bày thông tin.`,
+            content: `Dưới đây là thông tin tôi đã thu thập được và yêu cầu của người dùng. Hãy giúp tôi tạo ra một câu trả lời phù hợp:\n<request_data>\n${JSON.stringify(
+                contextForLLM,
+                null,
+                2
+            )}\n</request_data>\n\nHãy trả lời trực tiếp câu hỏi/yêu cầu của người dùng ("${message}") dựa trên những thông tin trên.`,
         },
     ];
 
@@ -307,13 +338,9 @@ Sử dụng 'notes_for_assistant' để hiểu rõ hơn về bối cảnh và c�
             messages: messagesForGPT,
             temperature: 0.2,
         });
-        let gptResponse = chatCompletion.choices[0].message.content;
-        return gptResponse;
+        return chatCompletion.choices[0].message.content;
     } catch (err) {
         console.error('Lỗi GPT:', err.response ? err.response.data : err.message);
-        if (err.response && err.response.data && err.response.data.error) {
-            console.error('Chi tiết lỗi từ OpenAI:', err.response.data.error.message);
-        }
         return 'Xin lỗi, hệ thống đang gặp một chút trục trặc. Bạn vui lòng thử lại sau ít phút nhé.';
     }
 };

@@ -268,7 +268,8 @@ export const getBookedByEmail = async (req, res) => {
                 populate: [{ path: 'type' }, { path: 'branch' }],
             })
             .populate('time_slots')
-            .populate('film');
+            .populate('film')
+            .sort({ date: -1 });
 
         if (!booking) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });

@@ -55,7 +55,7 @@ export const createFilm = async (req, res) => {
 
 export const getAllFilms = async (req, res) => {
     try {
-        const films = await filmModel.find({});
+        const films = await filmModel.find({}).sort({ createdAt: -1 });
 
         if (films.length === 0) {
             return res.status(400).json({ success: false, message: 'Không có thể loại nào trong cơ sở dữ liệu' });
