@@ -314,7 +314,7 @@ export const getCurrentActiveRoomsWithBookingId = async (req, res) => {
             if (isActive) {
                 activeRooms.push({
                     roomId: booking.room._id,
-                    bookingId: booking._id,
+                    bookingId: booking.id_booking,
                 });
             }
         });
@@ -333,15 +333,15 @@ export const getCurrentActiveRoomsWithBookingId = async (req, res) => {
 };
 
 export const getBookedById = async (req, res) => {
-    const { _id } = req.params;
+    const { id_booking } = req.params;
 
-    if (!_id) {
-        return res.status(400).json({ success: false, message: 'Vui lòng cung cấp _id' });
+    if (!id_booking) {
+        return res.status(400).json({ success: false, message: 'Vui lòng cung cấp id_booking' });
     }
 
     try {
         let booking = await bookingModel
-            .findOne({ _id })
+            .findOne({ id_booking })
             .populate({
                 path: 'room',
                 populate: [{ path: 'type' }, { path: 'branch' }],

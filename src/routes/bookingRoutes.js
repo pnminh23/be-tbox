@@ -21,7 +21,7 @@ const BookingRouter = express.Router();
 BookingRouter.post('/create', createBooking);
 BookingRouter.get('/get-book-timeSlots-by-room/:room/:date', getBookedTimeSlotsByRoom);
 BookingRouter.get('/get-booking-by-orderCode/:orderCode/', getBookedByOrderCode);
-BookingRouter.get('/get-booking-by-id/:_id/', getBookedById);
+BookingRouter.get('/get-booking-by-id/:id_booking/', getBookedById);
 BookingRouter.get('/get-all-booking-by-email', authMiddleware, getBookedByEmail);
 BookingRouter.get('/get-booking-by-email-current', authMiddleware, getBookedByEmailCurrent);
 BookingRouter.get('/get-booking-stats-by-email', authMiddleware, getBookingStatsByEmail);
