@@ -20,7 +20,7 @@ export const createOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Vui lòng cung cấp id_booking' });
         }
 
-        // 1. Lấy thông tin booking
+        
         const booking = await bookingModel.findOne({ id_booking });
         if (!booking) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
@@ -31,13 +31,13 @@ export const createOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Thiếu thông tin phòng, thời gian hoặc ngày' });
         }
 
-        // 2. Xác định khoảng ngày
+        
         const startOfDay = new Date(date);
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(date);
         endOfDay.setHours(23, 59, 59, 999);
 
-        // 3. Kiểm tra có booking trùng không
+        
         const existingBooking = await bookingModel.findOne({
             room: room,
             time_slots: { $in: time_slots },
@@ -49,11 +49,10 @@ export const createOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Khung giờ này đã có người đặt!' });
         }
 
-        // 4. Tạo orderCode và cập nhật
+    
         const orderCode = generateOrderCode();
         await bookingModel.findOneAndUpdate({ id_booking }, { orderCode }, { new: true });
 
-        // 5. Tạo link thanh toán từ PayOS
         const paymentLink = await payos.createPaymentLink({
             orderCode,
             amount,
