@@ -17,6 +17,7 @@ dayjs.extend(timezone);
 dayjs.extend(isSameOrBefore);
 dayjs.extend(isBetween);
 
+// *** BỘ NHỚ NGỮ CẢNH: Lưu trữ thông tin cho mỗi người dùng ***
 const userSessions = {};
 const VIETNAM_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
@@ -86,13 +87,15 @@ async function extractEntities(message, availableBranches, availableRoomTypes) {
         endTime: null,
         intent: 'unknown',
     };
+
     if (normalizedMessage.includes('phim hot') || normalizedMessage.includes('phim nao hay')) {
         extracted.intent = 'get_hot_films';
     } else if (normalizedMessage.includes('phim')) {
         extracted.intent = 'get_film_list';
     } else if (
-        normalizedMessage.includes('phong') &&
-        (normalizedMessage.includes('trong') || normalizedMessage.includes('con'))
+        (normalizedMessage.includes('phong') && (normalizedMessage.includes('trong') || normalizedMessage.includes('con'))) ||
+        normalizedMessage.includes('khung gio trong') ||
+        normalizedMessage.includes('the ngay mai') // Nhận diện câu hỏi nối tiếp
     ) {
         extracted.intent = 'find_available_rooms';
     } else if (normalizedMessage.includes('dat phong')) {
@@ -108,6 +111,13 @@ async function extractEntities(message, availableBranches, availableRoomTypes) {
     } else if (normalizedMessage.includes('loai phong nao') || normalizedMessage.includes('goi y loai phong')) {
         extracted.intent = 'recommend_room_type';
     }
+
+    const roomNameRegex = /(?:phong|p)\s*([a-zA-Z0-9]+)/;
+    const roomMatch = normalizedMessage.match(roomNameRegex);
+    if (roomMatch && roomMatch[1]) {
+        extracted.roomName = roomMatch[1];
+    }
+    
     let foundBranch = null;
     const sortedBranches = [...availableBranches].sort((a, b) => b.name.length - a.name.length);
     for (const branch of sortedBranches) {
@@ -123,25 +133,22 @@ async function extractEntities(message, availableBranches, availableRoomTypes) {
     if (foundBranch) {
         extracted.branchName = foundBranch.name;
     }
+    
     for (const roomType of availableRoomTypes) {
-        const roomTypeRegex = new RegExp(
-            `\\b${normalizeText(roomType.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
-            'i'
-        );
+        const roomTypeRegex = new RegExp(`\\b${normalizeText(roomType.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
         if (roomTypeRegex.test(normalizedMessage)) {
             extracted.roomTypeName = roomType.name;
             break;
         }
     }
+
     const fromNowRegex = /(?:tu gio|bay gio|hien tai)/;
     const untilRegex = /(?:den|toi)\s+([^\s]+(?:\s*gio)?(?:[0-9]{2})?)/;
     const rangeRegex = /(?:tu|from)\s+([^\s]+(?:\s*gio)?(?:[0-9]{2})?)\s+(?:den|to)\s+([^\s]+(?:\s*gio)?(?:[0-9]{2})?)/;
     const rangeMatch = normalizedMessage.match(rangeRegex);
     const untilMatch = normalizedMessage.match(untilRegex);
     if (rangeMatch) {
-        extracted.startTime = fromNowRegex.test(rangeMatch[1])
-            ? nowInVietnam.format('HH:mm')
-            : parseTimeFromMessage(rangeMatch[1]);
+        extracted.startTime = fromNowRegex.test(rangeMatch[1]) ? nowInVietnam.format('HH:mm') : parseTimeFromMessage(rangeMatch[1]);
         extracted.endTime = parseTimeFromMessage(rangeMatch[2]);
     } else if (untilMatch) {
         if (fromNowRegex.test(normalizedMessage)) {
@@ -149,6 +156,7 @@ async function extractEntities(message, availableBranches, availableRoomTypes) {
         }
         extracted.endTime = parseTimeFromMessage(untilMatch[1]);
     }
+
     return extracted;
 }
 
@@ -183,7 +191,37 @@ async function findAvailableRoomsForTimeRange({ branchId, date, startTime, endTi
     return availableRooms.map((room) => ({ name: room.name }));
 }
 
+async function findAvailableSlotsForRoom({ roomId, date }) {
+    const allTimeSlots = await timeSlotModel.find({}).sort({ start_time: 1 });
+    const startOfDay = dayjs(date).startOf('day').toDate();
+    const endOfDay = dayjs(date).endOf('day').toDate();
+    const bookingsForRoom = await bookingModel.find({
+        room: roomId,
+        date: { $gte: startOfDay, $lte: endOfDay },
+        status: { $nin: ['ĐÃ HỦY', 'THẤT BẠI'] },
+    });
+    const bookedSlotIds = new Set();
+    bookingsForRoom.forEach(booking => {
+        booking.time_slots.forEach(slotId => bookedSlotIds.add(slotId.toString()));
+    });
+    const nowInVietnam = dayjs().tz(VIETNAM_TIMEZONE);
+    const isToday = dayjs(date).isSame(nowInVietnam, 'day');
+    const availableSlots = allTimeSlots.filter(slot => {
+        const isBooked = bookedSlotIds.has(slot._id.toString());
+        if (isBooked) return false;
+        if (isToday) {
+            const slotStartTime = dayjs.tz(`${dayjs(date).format('YYYY-MM-DD')} ${slot.start_time}`, 'YYYY-MM-DD HH:mm', VIETNAM_TIMEZONE);
+            if (slotStartTime.isBefore(nowInVietnam)) {
+                return false;
+            }
+        }
+        return true;
+    });
+    return availableSlots;
+}
+
 export const handleChat = async (message, userId = 'defaultUser') => {
+    // Khởi tạo hoặc lấy lại phiên làm việc của user
     if (!userSessions[userId]) {
         userSessions[userId] = { context: {}, lastIntent: null };
     }
@@ -199,27 +237,15 @@ export const handleChat = async (message, userId = 'defaultUser') => {
 
     const allBranches = await branchModel.find({});
     const allRoomTypes = await roomTypeModel.find({});
-
     const extractedInfo = await extractEntities(message, allBranches, allRoomTypes);
     const newIntent = extractedInfo.intent;
-    const lastIntent = session.lastIntent;
-
-    const resetContextIntents = [
-        'get_hot_films',
-        'get_film_list',
-        'get_booking_instructions',
-        'recommend_branch',
-        'recommend_room_type',
-    ];
-
-    if (resetContextIntents.includes(newIntent)) {
-        session.context = {};
-    }
-
+    
+    // Lưu thông tin mới vào ngữ cảnh
     if (extractedInfo.branchName) session.context.branchName = extractedInfo.branchName;
     if (extractedInfo.date) session.context.date = extractedInfo.date.toISOString();
     if (extractedInfo.startTime) session.context.startTime = extractedInfo.startTime;
     if (extractedInfo.endTime) session.context.endTime = extractedInfo.endTime;
+    if (extractedInfo.roomName) session.context.roomName = extractedInfo.roomName;
 
     contextForLLM.user_context = { ...session.context };
     session.lastIntent = newIntent;
@@ -239,11 +265,12 @@ export const handleChat = async (message, userId = 'defaultUser') => {
             { $project: { name: '$film_details.name' } },
         ]);
         contextForLLM.database_info = { type: 'hot_film_list', films: hotFilms };
-        contextForLLM.notes_for_assistant.push(
-            "Người dùng muốn biết danh sách phim hot. Hãy trình bày các phim trong 'database_info.films'."
-        );
+        contextForLLM.notes_for_assistant.push("Người dùng muốn biết danh sách phim hot. Hãy trình bày các phim trong 'database_info.films'.");
+    
     } else if (newIntent === 'find_available_rooms') {
+        // Kết hợp thông tin mới và ngữ cảnh cũ
         const currentBranchName = session.context.branchName;
+        const currentRoomName = extractedInfo.roomName || session.context.roomName;
 
         if (!currentBranchName) {
             session.context.pendingAction = 'request_branch_for_rooms';
@@ -251,64 +278,99 @@ export const handleChat = async (message, userId = 'defaultUser') => {
             return `Bạn muốn kiểm tra phòng trống ở chi nhánh nào ạ? Hiện tại PNM-BOX có các chi nhánh: ${branchNames}.`;
         }
 
-        const nowInVietnam = dayjs().tz(VIETNAM_TIMEZONE);
-        let effectiveDate = session.context.date ? new Date(session.context.date) : nowInVietnam.toDate();
-        let effectiveStartTime = session.context.startTime;
-        let effectiveEndTime = session.context.endTime;
-
-        let noteForLLM = '';
-        if (!effectiveStartTime && !effectiveEndTime) {
-            effectiveStartTime = nowInVietnam.format('HH:mm');
-            effectiveEndTime = '23:30';
-            noteForLLM = `Người dùng không nói rõ thời gian, đã tự động mặc định tìm kiếm từ bây giờ đến 23:30 hôm nay.`;
-        } else if (!effectiveStartTime && effectiveEndTime) {
-            effectiveStartTime = nowInVietnam.format('HH:mm');
-            noteForLLM = `Người dùng chỉ cung cấp giờ kết thúc, đã tự động mặc định tìm kiếm từ bây giờ đến ${effectiveEndTime}.`;
-        } else if (effectiveStartTime && !effectiveEndTime) {
-            effectiveEndTime = '23:30';
-            noteForLLM = `Người dùng chỉ cung cấp giờ bắt đầu, đã tự động mặc định tìm kiếm từ ${effectiveStartTime} đến 23:30.`;
-        }
-        if (noteForLLM) {
-            contextForLLM.notes_for_assistant.push(noteForLLM);
-        }
-
-        session.context.pendingAction = null;
-
         const targetBranch = allBranches.find((b) => normalizeText(b.name) === normalizeText(currentBranchName));
-
         if (!targetBranch) {
             const branchNames = allBranches.map((b) => b.name).join(', ');
             return `Xin lỗi, PNM-BOX không tìm thấy chi nhánh "${currentBranchName}". Các chi nhánh hiện có là: ${branchNames}.`;
         }
+        
+        // Xử lý thời gian thông minh
+        const nowInVietnam = dayjs().tz(VIETNAM_TIMEZONE);
+        const openingTime = dayjs(nowInVietnam).hour(8).minute(0).second(0);
+        const closingTime = dayjs(nowInVietnam).hour(23).minute(30).second(0);
 
-        const availableRooms = await findAvailableRoomsForTimeRange({
-            branchId: targetBranch._id,
-            date: effectiveDate,
-            startTime: effectiveStartTime,
-            endTime: effectiveEndTime,
-        });
+        let effectiveDate = session.context.date ? new Date(session.context.date) : nowInVietnam.toDate();
+        let effectiveStartTime = session.context.startTime;
+        let effectiveEndTime = session.context.endTime;
+        let noteForLLM = '';
 
-        contextForLLM.database_info = {
-            type: 'range_availability_check',
-            query_details: {
-                branch: targetBranch.name,
-                date: dayjs(effectiveDate).format('DD/MM/YYYY'),
+        const isAskingForToday = !session.context.date || dayjs(effectiveDate).isSame(nowInVietnam, 'day');
+
+        if (isAskingForToday && nowInVietnam.isAfter(closingTime)) {
+            effectiveDate = nowInVietnam.add(1, 'day').toDate();
+            noteForLLM = `Người dùng nhắn tin sau giờ đóng cửa. Hệ thống đã tự động chuyển sang tìm kiếm phòng cho ngày mai (${dayjs(effectiveDate).format('DD/MM/YYYY')}).`;
+        }
+        
+        if (!effectiveStartTime && !effectiveEndTime) {
+            effectiveStartTime = '08:00';
+            effectiveEndTime = '23:30';
+            if (isAskingForToday && nowInVietnam.isBefore(openingTime) && !noteForLLM) {
+                noteForLLM = `Người dùng nhắn tin trước giờ mở cửa. Hệ thống sẽ tìm kiếm cho hôm nay bắt đầu từ lúc ${effectiveStartTime}.`;
+            } else if (!noteForLLM) {
+                noteForLLM = `Người dùng không nói rõ thời gian, hệ thống tự động tìm kiếm cho cả ngày.`;
+            }
+        }
+        
+        session.context.pendingAction = null;
+        
+        // Phân nhánh logic dựa trên việc có hỏi phòng cụ thể hay không
+        if (currentRoomName) {
+            const targetRoom = await roomModel.findOne({ name: currentRoomName, branch: targetBranch._id });
+            if (!targetRoom) {
+                return `Xin lỗi, PNM-BOX không tìm thấy phòng ${currentRoomName} tại chi nhánh ${targetBranch.name} ạ.`;
+            }
+
+            const availableSlots = await findAvailableSlotsForRoom({
+                roomId: targetRoom._id,
+                date: effectiveDate,
+            });
+
+            contextForLLM.database_info = {
+                type: 'single_room_availability_check',
+                query_details: {
+                    room: targetRoom.name,
+                    branch: targetBranch.name,
+                    date: dayjs(effectiveDate).format('DD/MM/YYYY'),
+                },
+                available_slots: availableSlots.map(slot => `${slot.start_time} - ${slot.end_time}`),
+            };
+
+            let availabilityNote = `Người dùng muốn biết các khung giờ còn trống của phòng ${targetRoom.name} ngày ${dayjs(effectiveDate).format('DD/MM/YYYY')}.`;
+            if (availableSlots.length > 0) {
+                availabilityNote += ` Kết quả: các khung giờ sau còn trống. Hãy liệt kê chi tiết các khung giờ này cho người dùng.`;
+            } else {
+                availabilityNote += ` Kết quả: phòng này đã được đặt hết hoặc đã qua hết các khung giờ có thể đặt trong ngày. Hãy thông báo cho người dùng và có thể gợi ý họ kiểm tra ngày khác.`;
+            }
+            contextForLLM.notes_for_assistant.push(availabilityNote);
+
+        } else {
+            const availableRooms = await findAvailableRoomsForTimeRange({
+                branchId: targetBranch._id,
+                date: effectiveDate,
                 startTime: effectiveStartTime,
                 endTime: effectiveEndTime,
-            },
-            available_rooms: availableRooms,
-        };
+            });
 
-        let availabilityNote = `Người dùng muốn tìm phòng trống liên tục từ ${effectiveStartTime} đến ${effectiveEndTime} ngày ${dayjs(
-            effectiveDate
-        ).format('DD/MM/YYYY')} tại chi nhánh ${targetBranch.name}.`;
-        if (availableRooms.length > 0) {
-            const roomNames = availableRooms.map((r) => r.name).join(', ');
-            availabilityNote += ` Kết quả: các phòng sau còn trống trong khoảng thời gian này: ${roomNames}. Hãy liệt kê các phòng này cho người dùng.`;
-        } else {
-            availabilityNote += ` Kết quả: không có phòng nào còn trống liên tục trong khoảng thời gian này. Hãy thông báo cho người dùng và gợi ý họ thử một khoảng thời gian hoặc chi nhánh khác.`;
+            contextForLLM.database_info = {
+                type: 'range_availability_check',
+                query_details: {
+                    branch: targetBranch.name,
+                    date: dayjs(effectiveDate).format('DD/MM/YYYY'),
+                    startTime: effectiveStartTime,
+                    endTime: effectiveEndTime,
+                },
+                available_rooms: availableRooms,
+            };
+            
+            contextForLLM.notes_for_assistant.push(noteForLLM);
+            let availabilityNote = `Người dùng muốn tìm phòng trống liên tục từ ${effectiveStartTime} đến ${effectiveEndTime} ngày ${dayjs(effectiveDate).format('DD/MM/YYYY')} tại chi nhánh ${targetBranch.name}.`;
+            if (availableRooms.length > 0) {
+                availabilityNote += ` Kết quả: các phòng sau còn trống. Hãy liệt kê các phòng này cho người dùng.`;
+            } else {
+                availabilityNote += ` Kết quả: không có phòng nào còn trống liên tục trong khoảng thời gian này. Hãy thông báo cho người dùng.`;
+            }
+            contextForLLM.notes_for_assistant.push(availabilityNote);
         }
-        contextForLLM.notes_for_assistant.push(availabilityNote);
     } else {
         contextForLLM.notes_for_assistant.push('Câu hỏi chung. Trả lời dựa trên thông tin có sẵn.');
         if (!message.trim()) {
