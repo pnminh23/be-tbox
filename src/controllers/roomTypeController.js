@@ -21,8 +21,7 @@ export const createTypeRoom = async (req, res) => {
 
 export const getAllTypeRooms = async (req, res) => {
     try {
-        // Sửa lại: Sắp xếp theo tên tăng dần (A-Z)
-        const allTypeRooms = await roomTypeModel.find({}).sort({ name: 1 });
+        const allTypeRooms = await roomTypeModel.find({});
 
         if (!allTypeRooms.length) {
             return res.status(200).json({ success: true, message: 'Chưa có loại phòng nào.', data: [] });

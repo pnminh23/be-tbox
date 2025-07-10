@@ -4,7 +4,7 @@ const promotions = new mongoose.Schema(
     {
         name: { type: String, required: true, unique: true },
         discountPercent: { type: Number, required: true },
-        quanlity: { type: Number, required: true },
+        quantity: { type: Number, required: true },
     },
     { timestamps: true }
 );
