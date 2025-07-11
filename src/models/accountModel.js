@@ -15,7 +15,7 @@ const accountSchema = new mongoose.Schema(
             default: 'user',
         },
         isActive: { type: Boolean, default: false },
-        isLock: { type: Boolean, default: false },
+        isLock: { type: Boolean, default: true },
         isResetpassword: { type: Boolean, default: false },
         verifyOTP: { type: String, default: '' },
         verifyOTPExpireAt: { type: Number, default: 0 },

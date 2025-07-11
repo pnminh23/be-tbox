@@ -53,7 +53,13 @@ export const register = async (req, res) => {
     try {
         const existingAccount = await accountModel.findOne({ email });
         if (existingAccount) {
-            return res.status(409).json({ success: false, message: 'Email đã tồn tại. Vui lòng sử dụng email khác.' }); // 409 Conflict
+            if (existingAccount.isActive) {
+                return res.status(409).json({ success: false, message: 'Email đã tồn tại và đã được xác thực. Vui lòng sử dụng email khác.' }); // 409 Conflict
+            } else {
+                // Xóa tài khoản chưa xác thực
+                await accountModel.deleteOne({ email });
+                console.log(`Đã xóa tài khoản chưa xác thực với email: ${email}`);
+            }
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -229,6 +235,7 @@ export const verifyEmail = async (req, res) => {
 
         // Cập nhật trạng thái tài khoản
         account.isActive = true;
+        account.isLock = false;
         account.verifyOTP = null; // Xóa OTP sau khi xác thực thành công
         account.verifyOTPExpireAt = null; // Xóa thời gian hết hạn
         await account.save();
