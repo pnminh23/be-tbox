@@ -36,7 +36,7 @@ export const createBooking = async (req, res) => {
         });
         if (existingBooking) return res.status(400).json({ success: false, message: 'Đã có người đặt!' });
 
-        // 1. Lấy thông tin phòng để lấy typeRoom
+        // Lấy thông tin phòng để lấy typeRoom
         const roomInfo = await roomModel.findById(room).populate('type');
         if (!roomInfo) return res.status(404).json({ success: false, message: 'Phòng không tồn tại' });
         if (!roomInfo.type)
@@ -103,7 +103,6 @@ export const createBooking = async (req, res) => {
         const cleanedPromotion = promotion === '' ? null : promotion;
         const cleanedCombo = combo === '' ? null : combo;
 
-        // 5. Tạo booking
         const newBooking = await bookingModel.create({
             id_booking,
             name_client,
